@@ -9,33 +9,15 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { Song } from '@/services/spotify'; // Assuming Song interface is defined here
-import { Music, PlusCircle, CheckCircle, XCircle } from 'lucide-react';
-import { searchSpotify, addSongToSpotifyPlaybackQueue } from '@/services/spotify'; // Using stubbed functions for now
-import { getDatabase, ref, onValue, push, set } from 'firebase/database';
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-
-// TODO: Replace with your actual Firebase config
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-let firebaseApp: FirebaseApp;
-if (!getApps().length) {
-  firebaseApp = initializeApp(firebaseConfig);
-} else {
-  firebaseApp = getApps()[0];
-}
-const db = getDatabase(firebaseApp);
+import { Music, PlusCircle, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
+import { searchSpotify } from '@/services/spotify'; // Using stubbed functions for now
+import { ref, onValue, push, set, serverTimestamp } from 'firebase/database'; // Added serverTimestamp
+import { db } from '@/lib/firebase'; // Import centralized Firebase instance
+import { ToastAction } from '@/components/ui/toast'; // Import ToastAction explicitly
 
 interface QueueSong extends Song {
   id: string; // Firebase key
-  timestampAdded: number;
+  timestampAdded: number | object; // Can be number or Firebase ServerValue.TIMESTAMP
   addedByUserId?: string; // Simple identifier, maybe session based later
 }
 
@@ -47,7 +29,16 @@ export default function ClientPage() {
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
   const [canAddSong, setCanAddSong] = useState(true);
   const [userSessionId, setUserSessionId] = useState<string | null>(null);
+  const [firebaseError, setFirebaseError] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Check Firebase availability on mount
+   useEffect(() => {
+     if (!db) {
+       setFirebaseError("Firebase Database is not configured correctly. Please check the setup.");
+       setIsLoadingQueue(false); // Stop loading state if DB is unavailable
+     }
+   }, []);
 
   // Generate or retrieve a simple user session ID
   useEffect(() => {
@@ -61,6 +52,11 @@ export default function ClientPage() {
 
   // Fetch queue from Firebase Realtime Database
   useEffect(() => {
+    if (!db) { // Guard against using db if initialization failed
+        setIsLoadingQueue(false);
+        return;
+    }
+
     const queueRef = ref(db, 'queue');
     setIsLoadingQueue(true);
     const unsubscribe = onValue(queueRef, (snapshot) => {
@@ -68,12 +64,19 @@ export default function ClientPage() {
       const loadedQueue: QueueSong[] = [];
       if (data) {
         Object.keys(data).forEach(key => {
-          loadedQueue.push({ id: key, ...data[key] });
+            // Ensure timestampAdded is treated as a number for sorting
+            const songData = data[key];
+            loadedQueue.push({
+              id: key,
+              ...songData,
+              timestampAdded: typeof songData.timestampAdded === 'number' ? songData.timestampAdded : 0 // Handle server timestamp object if needed, default to 0 for sorting
+            });
         });
         // Sort by timestampAdded
-        loadedQueue.sort((a, b) => a.timestampAdded - b.timestampAdded);
+        loadedQueue.sort((a, b) => (a.timestampAdded as number) - (b.timestampAdded as number));
       }
       setQueue(loadedQueue);
+      setFirebaseError(null); // Clear previous error on successful fetch
       setIsLoadingQueue(false);
 
       // Check if the current user can add a song
@@ -86,6 +89,7 @@ export default function ClientPage() {
 
     }, (error) => {
       console.error("Firebase Read Error:", error);
+      setFirebaseError("Could not load the song queue. Check console for details.");
       toast({
         title: "Error",
         description: "Could not load the song queue.",
@@ -96,7 +100,8 @@ export default function ClientPage() {
 
     // Cleanup subscription on unmount
     return () => unsubscribe();
-  }, [db, toast, userSessionId]);
+  }, [userSessionId, toast]); // Removed db from dependencies as it's stable after init
+
 
   const handleSearch = useCallback(async () => {
     if (!searchTerm.trim()) {
@@ -106,7 +111,12 @@ export default function ClientPage() {
     setIsLoadingSearch(true);
     try {
       // TODO: Read config from Firebase to determine search mode ('all' or 'playlist')
+      // For now, assuming 'all'. Fetching config requires db to be available.
       const config = { searchMode: 'all' } as const; // Placeholder
+      if (!db && config.searchMode === 'playlist') {
+        console.warn("Cannot fetch config for playlist search mode as DB is unavailable.");
+        // Optionally fall back to 'all' or show error
+      }
       const results = await searchSpotify(searchTerm, config);
       setSearchResults(results);
     } catch (error) {
@@ -120,7 +130,7 @@ export default function ClientPage() {
     } finally {
       setIsLoadingSearch(false);
     }
-  }, [searchTerm, toast]);
+  }, [searchTerm, toast]); // Removed db dependency for now
 
   // Debounced search
   useEffect(() => {
@@ -132,6 +142,14 @@ export default function ClientPage() {
   }, [searchTerm, handleSearch]);
 
   const handleAddSong = async (song: Song) => {
+     if (!db) {
+         toast({
+            title: "Error",
+            description: "Database connection is unavailable. Cannot add song.",
+            variant: "destructive",
+         });
+         return;
+     }
     if (!canAddSong || !userSessionId) {
        toast({
         title: "Cannot Add Song",
@@ -146,7 +164,8 @@ export default function ClientPage() {
 
     const newSongData: Omit<QueueSong, 'id'> = {
       ...song,
-      timestampAdded: Date.now(),
+      // Use Firebase server timestamp for accurate ordering
+      timestampAdded: serverTimestamp(),
       addedByUserId: userSessionId,
     };
 
@@ -159,7 +178,7 @@ export default function ClientPage() {
       });
       setSearchTerm(''); // Clear search after adding
       setSearchResults([]); // Clear results after adding
-      setCanAddSong(false); // Prevent adding another song immediately
+      // setCanAddSong(false); // Let the onValue listener update this state based on the DB
     } catch (error) {
       console.error("Firebase Write Error:", error);
       toast({
@@ -169,6 +188,25 @@ export default function ClientPage() {
       });
     }
   };
+
+  // Display Firebase Error if present
+   if (firebaseError) {
+       return (
+           <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
+               <Card className="w-full max-w-md shadow-lg border border-destructive">
+                   <CardHeader>
+                       <CardTitle className="text-destructive flex items-center gap-2">
+                           <AlertTriangle className="h-6 w-6" /> Configuration Error
+                       </CardTitle>
+                   </CardHeader>
+                   <CardContent>
+                       <p className="text-center text-destructive-foreground">{firebaseError}</p>
+                       <p className="text-center text-sm text-muted-foreground mt-2">Please ensure Firebase is correctly set up in your environment variables (.env file) and the configuration is valid.</p>
+                   </CardContent>
+               </Card>
+           </div>
+       );
+   }
 
 
   return (
@@ -296,12 +334,3 @@ export default function ClientPage() {
     </div>
   );
 }
-
-// Define ToastAction if not already globally available (shadcn usually provides it)
-const ToastAction = React.forwardRef<
-  React.ElementRef<typeof Button>,
-  React.ComponentPropsWithoutRef<typeof Button> & { altText: string }
->(({ altText, ...props }, ref) => (
-  <Button ref={ref} variant="outline" size="sm" {...props} />
-));
-ToastAction.displayName = "ToastAction";
