@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { GeistSans } from 'geist/font/sans';
+// Removed Geist font import as it's not installed
+// import { GeistSans } from 'geist/font/sans';
 import './globals.css';
 import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
@@ -17,9 +18,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
+        // Removed Geist font variable usage
+        // className={cn(
+        //   "min-h-screen bg-background font-sans antialiased",
+        //   GeistSans.variable
+        // )}
         className={cn(
-          "min-h-screen bg-background font-sans antialiased",
-          GeistSans.variable
+          "min-h-screen bg-background font-sans antialiased"
         )}
       >
         {children}

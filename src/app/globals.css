@@ -2,9 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+/* Removed Geist font import as it caused errors */
+/* body {
   font-family: var(--font-geist-sans), sans-serif;
-}
+} */
 
 @layer base {
   :root {
@@ -87,7 +88,7 @@ body {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans; /* Use default sans-serif */
     font-feature-settings: "rlig" 1,"calt" 1;
   }
 }
