@@ -13,49 +13,64 @@ const firebaseConfig = {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-function initializeFirebaseApp(): FirebaseApp {
-    // Ensure required config values are present
+function initializeFirebaseApp(): { app: FirebaseApp | null, dbValid: boolean } {
+    let app: FirebaseApp | null = null;
+    let dbValid = true; // Assume valid initially
+
+    // Ensure required config values are present for basic app initialization
     if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId) {
         console.error("Firebase config is missing required fields (apiKey, authDomain, projectId). Check your .env file.");
-        // Throw an error or return a dummy object to prevent further issues
-        // depending on how gracefully you want the app to fail.
-        throw new Error("Firebase configuration is incomplete.");
+        // Throw an error here because basic initialization will fail
+        throw new Error("Firebase configuration is incomplete for core services.");
     }
-    // Specifically check databaseURL as it caused the original error
+
+    // Check databaseURL validity separately without throwing an error immediately
      if (!firebaseConfig.databaseURL || !firebaseConfig.databaseURL.startsWith('https://')) {
-         console.error("Firebase databaseURL is missing or invalid. Check your .env file. It should start with 'https://'.");
-         throw new Error("Invalid Firebase databaseURL configuration.");
+         console.warn("Firebase databaseURL is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features will be disabled.");
+         dbValid = false; // Mark database as invalid
      }
 
-
-    if (!getApps().length) {
-        return initializeApp(firebaseConfig);
-    } else {
-        return getApp();
+    try {
+        if (!getApps().length) {
+            app = initializeApp(firebaseConfig);
+        } else {
+            app = getApp();
+        }
+    } catch (error) {
+        console.error("Failed to initialize Firebase App:", error);
+        throw new Error("Firebase App initialization failed."); // Throw if core init fails
     }
+
+    return { app, dbValid };
 }
 
 let firebaseApp: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Database | null = null;
+let isDbValid = false; // Track if DB config was valid during init
 
 try {
-    firebaseApp = initializeFirebaseApp();
-    auth = getAuth(firebaseApp);
-    // Only get database if URL is valid
-    if (firebaseConfig.databaseURL) {
-       db = getDatabase(firebaseApp);
-    } else {
-        console.warn("Firebase Database URL not configured, database features will be unavailable.");
+    const initResult = initializeFirebaseApp();
+    firebaseApp = initResult.app;
+    isDbValid = initResult.dbValid;
+
+    if (firebaseApp) {
+        auth = getAuth(firebaseApp); // Initialize Auth if app is valid
+
+        // Only initialize Database if the app is valid AND the DB URL was valid
+        if (isDbValid) {
+           db = getDatabase(firebaseApp);
+        }
     }
 
 } catch (error) {
-    console.error("Failed to initialize Firebase:", error);
+    // Error already logged in initializeFirebaseApp or during getAuth/getDatabase
     // Set instances to null so checks elsewhere fail gracefully
     firebaseApp = null;
     auth = null;
     db = null;
+    isDbValid = false;
 }
 
 
-export { firebaseApp, auth, db };
+export { firebaseApp, auth, db, isDbValid }; // Export isDbValid if needed elsewhere

@@ -8,11 +8,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import type { Song } from '@/services/spotify'; // Assuming Song interface is defined here
+import type { Song, SpotifyConfig } from '@/services/spotify'; // Assuming Song interface is defined here
 import { Music, PlusCircle, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
 import { searchSpotify } from '@/services/spotify'; // Using stubbed functions for now
-import { ref, onValue, push, set, serverTimestamp } from 'firebase/database'; // Added serverTimestamp
-import { db } from '@/lib/firebase'; // Import centralized Firebase instance
+import { ref, onValue, push, set, serverTimestamp, get } from 'firebase/database'; // Added serverTimestamp, get
+import { db, isDbValid } from '@/lib/firebase'; // Import centralized Firebase instance and validity flag
 import { ToastAction } from '@/components/ui/toast'; // Import ToastAction explicitly
 
 interface QueueSong extends Song {
@@ -30,13 +30,17 @@ export default function ClientPage() {
   const [canAddSong, setCanAddSong] = useState(true);
   const [userSessionId, setUserSessionId] = useState<string | null>(null);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
+  const [spotifyConfig, setSpotifyConfig] = useState<SpotifyConfig | null>(null); // Store fetched config
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
   const { toast } = useToast();
 
   // Check Firebase availability on mount
    useEffect(() => {
-     if (!db) {
-       setFirebaseError("Firebase Database is not configured correctly. Please check the setup.");
-       setIsLoadingQueue(false); // Stop loading state if DB is unavailable
+     // Use the flag exported from firebase.ts
+     if (!isDbValid) {
+       setFirebaseError("Firebase Database is not configured correctly (check DATABASE_URL in .env). Jukebox features are unavailable.");
+       setIsLoadingQueue(false); // Stop loading states
+       setIsLoadingConfig(false);
      }
    }, []);
 
@@ -49,6 +53,38 @@ export default function ClientPage() {
     }
     setUserSessionId(sessionId);
   }, []);
+
+  // Fetch Spotify config from Firebase
+  useEffect(() => {
+      if (!db) { // Guard if DB object is null (implies isDbValid was false)
+          setIsLoadingConfig(false);
+          return;
+      }
+      setIsLoadingConfig(true);
+      const configRef = ref(db, 'config');
+      get(configRef).then((snapshot) => {
+          if (snapshot.exists()) {
+              setSpotifyConfig(snapshot.val() as SpotifyConfig);
+          } else {
+              console.warn("Admin configuration not found in Firebase.");
+              // Set a default or handle the absence of config
+              setSpotifyConfig({ searchMode: 'all', spotifyConnected: false }); // Default assumption
+          }
+          setFirebaseError(null); // Clear config-related error on successful fetch
+      }).catch((error) => {
+          console.error("Firebase Config Read Error:", error);
+          setFirebaseError("Could not load Spotify configuration.");
+          toast({
+              title: "Error",
+              description: "Could not load Spotify configuration.",
+              variant: "destructive",
+          });
+          setSpotifyConfig(null); // Set config to null on error
+      }).finally(() => {
+          setIsLoadingConfig(false);
+      });
+  }, [toast]); // Removed db dependency
+
 
   // Fetch queue from Firebase Realtime Database
   useEffect(() => {
@@ -63,20 +99,28 @@ export default function ClientPage() {
       const data = snapshot.val();
       const loadedQueue: QueueSong[] = [];
       if (data) {
-        Object.keys(data).forEach(key => {
-            // Ensure timestampAdded is treated as a number for sorting
+        const sortedKeys = Object.keys(data).sort((a, b) => {
+          // Sort by explicit 'order' field if present, otherwise use timestamp
+          const orderA = data[a].order ?? (typeof data[a].timestampAdded === 'number' ? data[a].timestampAdded : 0);
+          const orderB = data[b].order ?? (typeof data[b].timestampAdded === 'number' ? data[b].timestampAdded : 0);
+          return orderA - orderB;
+        });
+
+        sortedKeys.forEach(key => {
             const songData = data[key];
             loadedQueue.push({
               id: key,
               ...songData,
-              timestampAdded: typeof songData.timestampAdded === 'number' ? songData.timestampAdded : 0 // Handle server timestamp object if needed, default to 0 for sorting
+               // Store the original timestamp or order value, handle server timestamp object
+              timestampAdded: songData.order ?? songData.timestampAdded ?? 0
             });
         });
-        // Sort by timestampAdded
-        loadedQueue.sort((a, b) => (a.timestampAdded as number) - (b.timestampAdded as number));
       }
       setQueue(loadedQueue);
-      setFirebaseError(null); // Clear previous error on successful fetch
+       // Clear queue-related error on successful fetch only if no general DB error exists
+       if (isDbValid) {
+          setFirebaseError(null);
+       }
       setIsLoadingQueue(false);
 
       // Check if the current user can add a song
@@ -88,36 +132,37 @@ export default function ClientPage() {
       }
 
     }, (error) => {
-      console.error("Firebase Read Error:", error);
-      setFirebaseError("Could not load the song queue. Check console for details.");
-      toast({
-        title: "Error",
-        description: "Could not load the song queue.",
-        variant: "destructive",
-      });
+      console.error("Firebase Queue Read Error:", error);
+      // Only set error if the DB was supposed to be valid
+      if (isDbValid) {
+          setFirebaseError("Could not load the song queue. Check console for details.");
+          toast({
+            title: "Error",
+            description: "Could not load the song queue.",
+            variant: "destructive",
+          });
+      }
       setIsLoadingQueue(false);
     });
 
     // Cleanup subscription on unmount
     return () => unsubscribe();
-  }, [userSessionId, toast]); // Removed db from dependencies as it's stable after init
+  }, [userSessionId, toast]); // Removed db dependency
 
 
   const handleSearch = useCallback(async () => {
-    if (!searchTerm.trim()) {
+    if (!searchTerm.trim() || isLoadingConfig || spotifyConfig === null) {
       setSearchResults([]);
+      if (!isLoadingConfig && spotifyConfig === null && isDbValid) {
+          // Config failed to load, maybe show a message?
+          console.warn("Cannot search: Spotify configuration is unavailable.");
+      }
       return;
     }
     setIsLoadingSearch(true);
     try {
-      // TODO: Read config from Firebase to determine search mode ('all' or 'playlist')
-      // For now, assuming 'all'. Fetching config requires db to be available.
-      const config = { searchMode: 'all' } as const; // Placeholder
-      if (!db && config.searchMode === 'playlist') {
-        console.warn("Cannot fetch config for playlist search mode as DB is unavailable.");
-        // Optionally fall back to 'all' or show error
-      }
-      const results = await searchSpotify(searchTerm, config);
+      // Use the fetched config
+      const results = await searchSpotify(searchTerm, spotifyConfig);
       setSearchResults(results);
     } catch (error) {
       console.error("Spotify Search Error:", error);
@@ -130,7 +175,7 @@ export default function ClientPage() {
     } finally {
       setIsLoadingSearch(false);
     }
-  }, [searchTerm, toast]); // Removed db dependency for now
+  }, [searchTerm, toast, spotifyConfig, isLoadingConfig]);
 
   // Debounced search
   useEffect(() => {
@@ -142,7 +187,7 @@ export default function ClientPage() {
   }, [searchTerm, handleSearch]);
 
   const handleAddSong = async (song: Song) => {
-     if (!db) {
+     if (!db) { // Check if DB is available
          toast({
             title: "Error",
             description: "Database connection is unavailable. Cannot add song.",
@@ -153,7 +198,7 @@ export default function ClientPage() {
     if (!canAddSong || !userSessionId) {
        toast({
         title: "Cannot Add Song",
-        description: "You already have a song in the queue. Please wait until it plays.",
+        description: !userSessionId ? "Cannot identify user session." : "You already have a song in the queue. Please wait until it plays.",
         variant: "destructive",
       });
       return;
@@ -162,11 +207,29 @@ export default function ClientPage() {
     const queueRef = ref(db, 'queue');
     const newSongRef = push(queueRef); // Generate a unique key
 
-    const newSongData: Omit<QueueSong, 'id'> = {
-      ...song,
-      // Use Firebase server timestamp for accurate ordering
-      timestampAdded: serverTimestamp(),
+     // Determine the 'order' for the new song.
+     // It should be placed after the last song's order/timestamp.
+     // Use serverTimestamp as a fallback if the queue is empty or has no numeric timestamps/orders.
+     let nextOrderValue: number | object = serverTimestamp();
+     if (queue.length > 0) {
+         const lastSong = queue[queue.length - 1];
+         const lastOrder = typeof lastSong.timestampAdded === 'number' ? lastSong.timestampAdded : 0;
+         // Add a small increment (e.g., 1000ms) to the last song's order/timestamp
+         // Or use a larger base if timestamps are actual Date.now()
+         nextOrderValue = lastOrder + 1000;
+     }
+
+
+    const newSongData: Omit<QueueSong, 'id' | 'timestampAdded'> & { timestampAdded: object, order: number | object } = {
+      spotifyTrackId: song.spotifyTrackId,
+      title: song.title,
+      artist: song.artist,
+      albumArtUrl: song.albumArtUrl,
       addedByUserId: userSessionId,
+       // Use serverTimestamp() for reliable ordering across clients initially
+      timestampAdded: serverTimestamp(),
+      // Assign the calculated order value
+      order: nextOrderValue,
     };
 
     try {
@@ -178,7 +241,7 @@ export default function ClientPage() {
       });
       setSearchTerm(''); // Clear search after adding
       setSearchResults([]); // Clear results after adding
-      // setCanAddSong(false); // Let the onValue listener update this state based on the DB
+      // Let the onValue listener update canAddSong state based on the DB change
     } catch (error) {
       console.error("Firebase Write Error:", error);
       toast({
@@ -189,20 +252,28 @@ export default function ClientPage() {
     }
   };
 
-  // Display Firebase Error if present
-   if (firebaseError) {
+  // Display Firebase Error if present (and DB was expected to be valid)
+   if (firebaseError && !isLoadingQueue) { // Show error card if error exists and queue is not loading
        return (
            <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
                <Card className="w-full max-w-md shadow-lg border border-destructive">
                    <CardHeader>
                        <CardTitle className="text-destructive flex items-center gap-2">
-                           <AlertTriangle className="h-6 w-6" /> Configuration Error
+                           <AlertTriangle className="h-6 w-6" /> Error Occurred
                        </CardTitle>
                    </CardHeader>
                    <CardContent>
                        <p className="text-center text-destructive-foreground">{firebaseError}</p>
-                       <p className="text-center text-sm text-muted-foreground mt-2">Please ensure Firebase is correctly set up in your environment variables (.env file) and the configuration is valid.</p>
+                       <p className="text-center text-sm text-muted-foreground mt-2">
+                         { !isDbValid
+                             ? "Please ensure Firebase is correctly set up in your environment variables (.env file), especially the DATABASE_URL."
+                             : "Please check the browser console for more details or try reloading the page."
+                         }
+                        </p>
                    </CardContent>
+                    <CardFooter>
+                        <Button variant="outline" onClick={() => window.location.reload()}>Reload Page</Button>
+                    </CardFooter>
                </Card>
            </div>
        );
@@ -222,10 +293,11 @@ export default function ClientPage() {
           <CardContent className="space-y-4">
             <Input
               type="search"
-              placeholder="Search Spotify for songs..."
+              placeholder={isLoadingConfig ? "Loading settings..." : (spotifyConfig?.searchMode === 'playlist' ? `Search playlist...` : `Search Spotify...`)}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="text-base md:text-sm"
+              disabled={isLoadingConfig || firebaseError} // Disable if loading config or if there's an error
             />
             <Separator />
             <ScrollArea className="h-[300px] md:h-[400px] pr-3">
@@ -239,17 +311,22 @@ export default function ClientPage() {
                 <ul className="space-y-2">
                   {searchResults.map((song) => (
                     <li key={song.spotifyTrackId} className="flex items-center justify-between p-2 rounded-md hover:bg-secondary transition-colors">
-                      <div>
-                        <p className="font-medium text-foreground">{song.title}</p>
-                        <p className="text-sm text-muted-foreground">{song.artist}</p>
+                      <div className='flex items-center gap-2 overflow-hidden'>
+                         {song.albumArtUrl && (
+                             <img src={song.albumArtUrl} alt={`${song.title} album art`} className="h-10 w-10 rounded object-cover flex-shrink-0"/>
+                          )}
+                         <div className='overflow-hidden'>
+                            <p className="font-medium text-foreground truncate" title={song.title}>{song.title}</p>
+                            <p className="text-sm text-muted-foreground truncate" title={song.artist}>{song.artist}</p>
+                         </div>
                       </div>
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => handleAddSong(song)}
-                        disabled={!canAddSong}
+                        disabled={!canAddSong || !db} // Also disable if DB is not available
                         aria-label={`Add ${song.title} to queue`}
-                        className="text-accent disabled:text-muted-foreground"
+                        className="text-accent disabled:text-muted-foreground ml-2"
                       >
                         <PlusCircle className="h-5 w-5" />
                       </Button>
@@ -258,15 +335,20 @@ export default function ClientPage() {
                 </ul>
               ) : (
                 <p className="text-center text-muted-foreground py-4">
-                  {searchTerm ? "No songs found." : "Start typing to search."}
+                  {isLoadingConfig ? "Loading..." : (searchTerm ? "No songs found." : (spotifyConfig?.searchMode === 'playlist' ? "Search within the selected playlist." : "Start typing to search all Spotify."))}
                 </p>
               )}
             </ScrollArea>
-              {!canAddSong && (
-                 <p className="text-sm text-center text-destructive mt-2">
-                   You can add another song after yours has played.
+              {!canAddSong && !isLoadingQueue && ( // Only show if not loading and user cannot add
+                 <p className="text-sm text-center text-destructive mt-2 px-2">
+                   You can add another song after yours has played or been removed.
                  </p>
                )}
+              {firebaseError && ( // Show a small indicator if there's a DB error
+                 <p className="text-xs text-center text-destructive/80 mt-1 px-2">
+                     Database connection issues might prevent adding songs.
+                 </p>
+              )}
           </CardContent>
         </Card>
       </div>
@@ -284,47 +366,42 @@ export default function ClientPage() {
              <ScrollArea className="h-full p-6">
                {isLoadingQueue ? (
                  <div className="space-y-3">
-                   <div className="flex items-center space-x-3">
-                     <Skeleton className="h-10 w-10 rounded-full" />
-                     <div className="space-y-1 flex-1">
-                       <Skeleton className="h-4 w-3/4 rounded" />
-                       <Skeleton className="h-3 w-1/2 rounded" />
+                   {[...Array(3)].map((_, i) => (
+                     <div key={i} className="flex items-center space-x-3 p-3">
+                       <Skeleton className="h-10 w-10 rounded object-cover flex-shrink-0" />
+                       <div className="space-y-1 flex-1">
+                         <Skeleton className="h-4 w-3/4 rounded" />
+                         <Skeleton className="h-3 w-1/2 rounded" />
+                       </div>
+                       <Skeleton className="h-6 w-6 rounded-full" />
                      </div>
-                   </div>
-                   <div className="flex items-center space-x-3">
-                     <Skeleton className="h-10 w-10 rounded-full" />
-                     <div className="space-y-1 flex-1">
-                       <Skeleton className="h-4 w-3/4 rounded" />
-                       <Skeleton className="h-3 w-1/2 rounded" />
-                     </div>
-                   </div>
-                   <div className="flex items-center space-x-3">
-                     <Skeleton className="h-10 w-10 rounded-full" />
-                     <div className="space-y-1 flex-1">
-                       <Skeleton className="h-4 w-3/4 rounded" />
-                       <Skeleton className="h-3 w-1/2 rounded" />
-                     </div>
-                   </div>
+                    ))}
                  </div>
                ) : queue.length > 0 ? (
                  <ul className="space-y-3">
                    {queue.map((song, index) => (
                      <li key={song.id} className="flex items-center gap-3 p-3 rounded-md bg-card border border-border transition-colors hover:bg-secondary/50">
-                       <span className="text-lg font-medium text-primary w-6 text-center">{index + 1}</span>
-                       <Music className="h-5 w-5 text-accent flex-shrink-0" />
+                       <span className="text-lg font-medium text-primary w-6 text-center flex-shrink-0">{index + 1}</span>
+                       {song.albumArtUrl ? (
+                           <img src={song.albumArtUrl} alt={`${song.title} album art`} className="h-10 w-10 rounded object-cover flex-shrink-0"/>
+                       ) : (
+                          <div className="h-10 w-10 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                            <Music className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                       )}
                        <div className="flex-grow overflow-hidden">
                          <p className="font-medium text-foreground truncate" title={song.title}>{song.title}</p>
                          <p className="text-sm text-muted-foreground truncate" title={song.artist}>{song.artist}</p>
                        </div>
                        {song.addedByUserId === userSessionId && (
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" title="Added by you"/>
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 ml-auto" title="Added by you"/>
                        )}
                      </li>
                    ))}
                  </ul>
                ) : (
                  <p className="text-center text-muted-foreground py-10">
-                   The queue is empty. Add a song!
+                   {firebaseError ? "Queue unavailable due to error." : "The queue is empty. Add a song!"}
                  </p>
                )}
              </ScrollArea>
