@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"; // Added CardFooter
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -70,15 +70,21 @@ export default function ClientPage() {
               // Set a default or handle the absence of config
               setSpotifyConfig({ searchMode: 'all', spotifyConnected: false }); // Default assumption
           }
-          setFirebaseError(null); // Clear config-related error on successful fetch
+          // Clear config-related error only if general DB isn't errored
+          if (isDbValid) {
+            setFirebaseError(null);
+          }
       }).catch((error) => {
           console.error("Firebase Config Read Error:", error);
-          setFirebaseError("Could not load Spotify configuration.");
-          toast({
-              title: "Error",
-              description: "Could not load Spotify configuration.",
-              variant: "destructive",
-          });
+          // Only set error if the DB was supposed to be valid
+          if (isDbValid) {
+            setFirebaseError("Could not load Spotify configuration.");
+            toast({
+                title: "Error",
+                description: "Could not load Spotify configuration.",
+                variant: "destructive",
+            });
+          }
           setSpotifyConfig(null); // Set config to null on error
       }).finally(() => {
           setIsLoadingConfig(false);
@@ -253,7 +259,7 @@ export default function ClientPage() {
   };
 
   // Display Firebase Error if present (and DB was expected to be valid)
-   if (firebaseError && !isLoadingQueue) { // Show error card if error exists and queue is not loading
+   if (firebaseError && !isLoadingQueue && !isLoadingConfig) { // Show error card if error exists and not loading queue/config
        return (
            <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
                <Card className="w-full max-w-md shadow-lg border border-destructive">
@@ -297,7 +303,7 @@ export default function ClientPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="text-base md:text-sm"
-              disabled={isLoadingConfig || firebaseError} // Disable if loading config or if there's an error
+              disabled={isLoadingConfig || !isDbValid} // Disable if loading config or if DB is invalid
             />
             <Separator />
             <ScrollArea className="h-[300px] md:h-[400px] pr-3">
@@ -336,15 +342,16 @@ export default function ClientPage() {
               ) : (
                 <p className="text-center text-muted-foreground py-4">
                   {isLoadingConfig ? "Loading..." : (searchTerm ? "No songs found." : (spotifyConfig?.searchMode === 'playlist' ? "Search within the selected playlist." : "Start typing to search all Spotify."))}
+                   {!isDbValid && <span className="block text-xs text-destructive/80 mt-1">Search disabled due to DB error.</span>}
                 </p>
               )}
             </ScrollArea>
-              {!canAddSong && !isLoadingQueue && ( // Only show if not loading and user cannot add
+              {!canAddSong && !isLoadingQueue && isDbValid && ( // Only show if not loading, can't add, and DB is valid
                  <p className="text-sm text-center text-destructive mt-2 px-2">
                    You can add another song after yours has played or been removed.
                  </p>
                )}
-              {firebaseError && ( // Show a small indicator if there's a DB error
+              {!isDbValid && ( // Show a small indicator if there's a DB error
                  <p className="text-xs text-center text-destructive/80 mt-1 px-2">
                      Database connection issues might prevent adding songs.
                  </p>
@@ -401,11 +408,18 @@ export default function ClientPage() {
                  </ul>
                ) : (
                  <p className="text-center text-muted-foreground py-10">
-                   {firebaseError ? "Queue unavailable due to error." : "The queue is empty. Add a song!"}
+                   {!isDbValid ? "Queue unavailable due to database error." : "The queue is empty. Add a song!"}
                  </p>
                )}
              </ScrollArea>
           </CardContent>
+           {!isDbValid && (
+                <CardFooter className="border-t px-6 py-3 bg-destructive/10">
+                    <p className="text-sm text-destructive flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" /> Queue features are unavailable due to a database configuration error.
+                    </p>
+                </CardFooter>
+            )}
         </Card>
       </div>
     </div>

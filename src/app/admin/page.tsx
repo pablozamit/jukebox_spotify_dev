@@ -39,22 +39,25 @@ export default function AdminPage() {
   const [config, setConfig] = useState<AdminConfig | null>(null); // Can be null initially
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
   const [playlistIdInput, setPlaylistIdInput] = useState('');
-  const [firebaseError, setFirebaseError] = useState<string | null>(null);
+  const [firebaseError, setFirebaseError] = useState<string | null>(null); // Consolidated error state
   const router = useRouter();
   const { toast } = useToast();
 
- // Check Firebase availability on mount
+ // Check Firebase availability on mount and set initial error state
   useEffect(() => {
-    // Use the flag exported from firebase.ts
+    let errorMsg = '';
     if (!isDbValid) {
-      setFirebaseError("Firebase Database is not configured correctly (check DATABASE_URL in .env). Queue and config features are unavailable.");
-      setIsLoadingQueue(false); // Stop loading states
+      errorMsg += "Firebase Database is not configured correctly (check DATABASE_URL in .env). Queue and config features are unavailable.";
+      setIsLoadingQueue(false); // Stop loading states if DB is invalid
       setIsLoadingConfig(false);
     }
-     if (!auth) {
-         setFirebaseError(prev => prev ? `${prev} Firebase Auth is also unavailable.` : "Firebase Auth is not configured correctly. Login/logout will not work.");
-         setLoadingAuth(false); // Stop auth loading if auth service itself is missing
-     }
+    if (!auth) {
+      errorMsg += (errorMsg ? ' ' : '') + "Firebase Auth is not configured correctly. Login/logout will not work.";
+      setLoadingAuth(false); // Stop auth loading if auth service itself is missing
+    }
+    if (errorMsg) {
+        setFirebaseError(errorMsg);
+    }
   }, []);
 
 
@@ -67,22 +70,25 @@ export default function AdminPage() {
         setUser(currentUser);
       } else {
         setUser(null);
-        router.push('/admin/login'); // Redirect to login if not authenticated
+        // Only redirect if auth service exists and user is truly logged out
+        if (auth) {
+            router.push('/admin/login');
+        }
       }
       setLoadingAuth(false);
     });
     return () => unsubscribe(); // Cleanup subscription
   }, [router]); // Removed auth dependency
 
-  // Fetch Queue
+  // Fetch Queue - Only runs if DB is valid
   useEffect(() => {
-    if (!user || !db) { // Don't fetch if not logged in or db unavailable (already handled by isDbValid check)
-        setIsLoadingQueue(false);
+    if (!user || !isDbValid) { // Check DB validity here
+        // If DB is invalid, loading state was already set to false in the first effect
         return;
     }
 
     const queueRef = ref(db, 'queue');
-    setIsLoadingQueue(true);
+    setIsLoadingQueue(true); // Start loading only if we attempt to fetch
     const unsubscribe = onValue(queueRef, (snapshot) => {
       const data = snapshot.val();
       const loadedQueue: QueueSong[] = [];
@@ -105,32 +111,29 @@ export default function AdminPage() {
         });
       }
       setQueue(loadedQueue);
-      // Clear queue-related error only if general DB isn't errored
-      if (isDbValid) {
-        setFirebaseError(null);
-      }
       setIsLoadingQueue(false);
+      // No need to clear firebaseError here, it's handled by the initial check
     }, (error) => {
       console.error("Firebase Queue Read Error:", error);
-      // Only set error if the DB was supposed to be valid
+      // Only set error if the DB was supposed to be valid (redundant check but safe)
       if (isDbValid) {
-          setFirebaseError("Could not load queue. Check console.");
+          setFirebaseError("Could not load queue. Check console and Firebase rules.");
           toast({ title: "Error", description: "Could not load queue.", variant: "destructive" });
       }
       setIsLoadingQueue(false);
     });
     return () => unsubscribe();
-  }, [user, toast]); // Removed db dependency
+  }, [user, toast]); // Removed db dependency, added isDbValid check
 
-  // Fetch Config
+  // Fetch Config - Only runs if DB is valid
    useEffect(() => {
-     if (!user || !db) { // Don't fetch if not logged in or db unavailable
-        setIsLoadingConfig(false);
+     if (!user || !isDbValid) { // Check DB validity here
+        // If DB is invalid, loading state was already set to false in the first effect
         return;
      }
 
      const configRef = ref(db, 'config');
-     setIsLoadingConfig(true);
+     setIsLoadingConfig(true); // Start loading only if we attempt to fetch
      const unsubscribe = onValue(configRef, (snapshot) => {
        const data = snapshot.val();
        if (data) {
@@ -139,34 +142,38 @@ export default function AdminPage() {
        } else {
          // Set default config if none exists in DB
          const defaultConfig: AdminConfig = { searchMode: 'all', spotifyConnected: false };
-         set(configRef, defaultConfig).then(() => {
-             setConfig(defaultConfig); // Set state after DB write confirmation
-             setPlaylistIdInput('');
-             console.log("Default config written to Firebase.");
-         }).catch(err => {
-             console.error("Failed to set default config:", err);
-             if (isDbValid) { // Only show error if DB should be working
-                 setFirebaseError("Failed to write default configuration.");
-                 toast({ title: "Error", description: "Could not save default configuration.", variant: "destructive" });
-             }
-          });
-       }
-        // Clear config-related error only if general DB isn't errored
-       if (isDbValid) {
-           setFirebaseError(null);
+         // Attempt to set default config only if db is valid
+         if (db) {
+            set(configRef, defaultConfig).then(() => {
+                setConfig(defaultConfig); // Set state after DB write confirmation
+                setPlaylistIdInput('');
+                console.log("Default config written to Firebase.");
+            }).catch(err => {
+                console.error("Failed to set default config:", err);
+                // Set specific error for this failure
+                setFirebaseError("Failed to write default configuration.");
+                toast({ title: "Error", description: "Could not save default configuration.", variant: "destructive" });
+            });
+         } else {
+            // This case should theoretically not be reached due to isDbValid check, but safe fallback
+            setConfig(defaultConfig); // Use default locally if DB write isn't possible
+            setPlaylistIdInput('');
+            console.warn("DB unavailable, using default config locally.");
+         }
        }
        setIsLoadingConfig(false);
+       // No need to clear firebaseError here
      }, (error) => {
        console.error("Firebase Config Read Error:", error);
-        // Only set error if the DB was supposed to be valid
+       // Only set error if the DB was supposed to be valid
        if (isDbValid) {
-           setFirebaseError("Could not load configuration. Check console.");
+           setFirebaseError("Could not load configuration. Check console and Firebase rules.");
            toast({ title: "Error", description: "Could not load configuration.", variant: "destructive" });
        }
        setIsLoadingConfig(false);
      });
      return () => unsubscribe();
-   }, [user, toast]); // Removed db dependency
+   }, [user, toast]); // Removed db dependency, added isDbValid check
 
   const handleLogout = async () => {
     if (!auth) {
@@ -175,15 +182,18 @@ export default function AdminPage() {
     }
     try {
       await signOut(auth);
-      router.push('/admin/login');
+      // Router push is handled by the onAuthStateChanged listener
     } catch (error) {
       console.error("Logout Error:", error);
       toast({ title: "Logout Error", description: "Could not log out.", variant: "destructive" });
     }
   };
 
+   // Determine if DB operations should be disabled
+   const disableDbOperations = !isDbValid;
+
   const handleRemoveSong = async (songId: string, addedByUserId?: string) => {
-     if (!db) {
+     if (disableDbOperations || !db) { // Added !db check for type safety
          toast({ title: "Error", description: "Database unavailable.", variant: "destructive" });
          return;
      }
@@ -206,7 +216,7 @@ export default function AdminPage() {
 
   // --- Reordering Logic (Assign explicit order numbers) ---
   const handleMove = async (index: number, direction: 'up' | 'down') => {
-      if (!db) {
+      if (disableDbOperations || !db) { // Added !db check
            toast({ title: "Error", description: "Database unavailable.", variant: "destructive" });
            return;
       };
@@ -244,7 +254,7 @@ export default function AdminPage() {
   // --- End Reordering Logic ---
 
   const handleConfigChange = async (updates: Partial<AdminConfig>) => {
-      if (!db || !config) { // Need db and existing config to update
+      if (disableDbOperations || !db || !config) { // Need db and existing config to update
            toast({ title: "Error", description: "Database unavailable or config not loaded.", variant: "destructive" });
            return;
       };
@@ -260,10 +270,12 @@ export default function AdminPage() {
   };
 
   const handleSearchModeToggle = (checked: boolean) => {
+    if (disableDbOperations) return; // Prevent change if DB is down
     handleConfigChange({ searchMode: checked ? 'playlist' : 'all' });
   };
 
   const handlePlaylistIdSave = () => {
+    if (disableDbOperations) return; // Prevent save if DB is down
     if (config?.searchMode === 'playlist') {
       handleConfigChange({ playlistId: playlistIdInput.trim() });
     }
@@ -271,7 +283,7 @@ export default function AdminPage() {
 
   // Placeholder for Spotify OAuth flow
   const handleSpotifyConnect = () => {
-    if (!db) {
+    if (disableDbOperations) {
          toast({ title: "Error", description: "Database unavailable. Cannot update Spotify status.", variant: "destructive" });
          return;
     }
@@ -289,7 +301,7 @@ export default function AdminPage() {
 
   // Add next song to Spotify Queue using the wrapper function
   const handleAddNextToSpotify = async () => {
-     if (!db) {
+     if (disableDbOperations || !db) { // Added !db check
          toast({ title: "Error", description: "Database unavailable.", variant: "destructive" });
          return;
      }
@@ -318,24 +330,21 @@ export default function AdminPage() {
   };
 
 
-   // Display Firebase Error if present and not just loading
-   if (firebaseError && !isLoadingQueue && !isLoadingConfig) {
+   // Display Firebase Error if present (highest priority)
+   if (firebaseError) {
        return (
            <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
                 <Card className="w-full max-w-lg shadow-lg border border-destructive">
                    <CardHeader>
                        <CardTitle className="text-destructive flex items-center gap-2">
-                           <AlertTriangle className="h-6 w-6" /> Runtime Error
+                           <AlertTriangle className="h-6 w-6" /> Configuration Error
                        </CardTitle>
-                        <CardDescription>There was an issue with Firebase.</CardDescription>
+                        <CardDescription>There was an issue with Firebase setup.</CardDescription>
                    </CardHeader>
                    <CardContent>
                        <p className="text-destructive-foreground">{firebaseError}</p>
                        <p className="text-sm text-muted-foreground mt-2">
-                         { !isDbValid
-                           ? "Please ensure Firebase is correctly set up in your environment variables (.env file), especially the DATABASE_URL."
-                           : "Please check the browser console for more details and verify your Firebase project configuration."
-                         }
+                         Please ensure Firebase is correctly set up in your environment variables (.env file) and that the project has the necessary services enabled (Authentication, Realtime Database).
                         </p>
                    </CardContent>
                    <CardFooter className="justify-between">
@@ -350,20 +359,18 @@ export default function AdminPage() {
    }
 
 
+  // Show loading spinner while authentication is checked (if no firebase error)
   if (loadingAuth || !user) {
-    // Show loading spinner only if auth service itself is okay
     return (
       <div className="flex justify-center items-center min-h-screen">
+         {/* Show spinner only if auth service itself is ok (checked via lack of firebaseError) */}
         {auth && <RefreshCw className="h-8 w-8 animate-spin text-primary" />}
-         {!auth && !firebaseError && <p className="text-muted-foreground">Auth service unavailable...</p>}
-        {/* If firebaseError is set, the error card above should be shown instead */}
+        {/* If auth service is missing, firebaseError would be set and the error card shown */}
       </div>
     );
   }
 
-  // Determine if DB operations should be disabled
-  const disableDbOperations = !isDbValid;
-
+  // --- Main Admin UI ---
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6 min-h-screen bg-background">
        {/* Queue Management Section */}
@@ -377,10 +384,12 @@ export default function AdminPage() {
                 variant="outline"
                 size="sm"
                 onClick={handleAddNextToSpotify}
-                disabled={queue.length === 0 || !config?.spotifyConnected || disableDbOperations} // Disable if DB error
+                // Also disable if config isn't loaded yet
+                disabled={disableDbOperations || queue.length === 0 || !config?.spotifyConnected || isLoadingConfig}
                 className="bg-accent text-accent-foreground hover:bg-accent/90 disabled:opacity-50"
               >
-                <Music className="mr-2 h-4 w-4" /> Add Next to Spotify
+                 {isLoadingConfig && !config ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Music className="mr-2 h-4 w-4" />}
+                Add Next to Spotify
               </Button>
           </CardHeader>
           <CardContent className="flex-grow overflow-hidden p-0">
@@ -390,7 +399,6 @@ export default function AdminPage() {
                   {[...Array(5)].map((_, i) => ( // Render 5 skeleton items
                     <div key={i} className="flex items-center space-x-3 p-3">
                        <Skeleton className="h-10 w-10 rounded object-cover flex-shrink-0" />
-                       {/* <Skeleton className="h-5 w-5 rounded-full" /> */}
                       <div className="space-y-1 flex-1">
                         <Skeleton className="h-4 w-3/4 rounded" />
                         <Skeleton className="h-3 w-1/2 rounded" />
@@ -456,15 +464,16 @@ export default function AdminPage() {
                 </ul>
               ) : (
                 <p className="text-center text-muted-foreground py-10">
-                    {disableDbOperations ? "Queue unavailable due to database configuration issue." : "Queue is empty."}
+                    {/* Message handled by disableDbOperations check below */}
+                    {!disableDbOperations && "Queue is empty."}
                 </p>
               )}
             </ScrollArea>
           </CardContent>
            {disableDbOperations && (
-                <CardFooter className="border-t px-6 py-3">
+                <CardFooter className="border-t px-6 py-3 bg-destructive/10">
                     <p className="text-sm text-destructive flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4" /> Database features are disabled due to configuration error.
+                        <AlertTriangle className="h-4 w-4" /> Database features (queue, settings) are disabled due to configuration error.
                     </p>
                 </CardFooter>
             )}
@@ -480,19 +489,15 @@ export default function AdminPage() {
              </CardTitle>
            </CardHeader>
            <CardContent className="space-y-6">
-             {isLoadingConfig || config === null ? ( // Show skeleton if loading or config is null (and DB is expected)
+             {isLoadingConfig ? ( // Show skeleton if config is loading (and DB is valid)
                 <div className="space-y-4">
-                   {isDbValid ? ( // Only show skeletons if DB was supposed to be valid
-                     <>
+                    <>
                        <Skeleton className="h-8 w-full rounded-md" />
                        <Skeleton className="h-10 w-full rounded-md" />
                        <Skeleton className="h-10 w-full rounded-md" />
-                     </>
-                     ) : (
-                     <p className='text-sm text-muted-foreground text-center'>Configuration unavailable.</p>
-                    )}
+                    </>
                 </div>
-             ) : (
+             ) : config ? ( // Render controls only if config is loaded
                 <>
                  {/* Spotify Connection */}
                  <div className="flex items-center justify-between">
@@ -516,31 +521,36 @@ export default function AdminPage() {
                      aria-label="Toggle search mode between all Spotify and specific playlist"
                      disabled={disableDbOperations}
                    />
-                   <Label htmlFor="search-mode">Use Specific Playlist</Label>
+                   <Label htmlFor="search-mode" className={disableDbOperations ? 'cursor-not-allowed opacity-50' : ''}>Use Specific Playlist</Label>
                  </div>
 
                  {/* Playlist ID Input (conditionally shown) */}
                  {config.searchMode === 'playlist' && (
                    <div className="space-y-2">
-                     <Label htmlFor="playlist-id">Spotify Playlist ID</Label>
+                     <Label htmlFor="playlist-id" className={disableDbOperations ? 'cursor-not-allowed opacity-50' : ''}>Spotify Playlist ID</Label>
                      <div className="flex gap-2">
                        <Input
                          id="playlist-id"
                          value={playlistIdInput}
                          onChange={(e) => setPlaylistIdInput(e.target.value)}
                          placeholder="Enter Playlist ID"
-                         disabled={config.searchMode !== 'playlist' || disableDbOperations}
+                         disabled={disableDbOperations}
                          className="flex-grow"
                        />
-                       <Button onClick={handlePlaylistIdSave} size="sm" disabled={config.searchMode !== 'playlist' || !playlistIdInput.trim() || disableDbOperations}>Save</Button>
+                       <Button onClick={handlePlaylistIdSave} size="sm" disabled={disableDbOperations || !playlistIdInput.trim()}>Save</Button>
                      </div>
                    </div>
                  )}
                </>
+             ) : (
+                 <p className='text-sm text-muted-foreground text-center'>
+                    {/* Message handled by disableDbOperations check below */}
+                    {!disableDbOperations && "Could not load settings."}
+                 </p>
              )}
            </CardContent>
              {disableDbOperations && (
-                <CardFooter className="border-t px-6 py-3">
+                <CardFooter className="border-t px-6 py-3 bg-destructive/10">
                     <p className="text-sm text-destructive flex items-center gap-2">
                         <AlertTriangle className="h-4 w-4" /> Settings cannot be saved.
                     </p>
