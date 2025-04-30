@@ -1,3 +1,4 @@
+/* eslint-disable max-len */
 import { onRequest } from "firebase-functions/v2/https";
 import { config } from "firebase-functions";
 import * as logger from "firebase-functions/logger";
@@ -102,7 +103,7 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
     }
 
     // 4) Format and return results
-    const results = tracks.map(track => ({
+    const results = tracks.map((track) => ({
       id: track.id,
       name: track.name,
       artists: track.artists.map((a: any) => a.name),
@@ -113,7 +114,6 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
 
     logger.info(`Returning ${results.length} results`);
     res.status(200).json({ results });
-
   } catch (error: any) {
     logger.error("searchSpotify error:", error);
     if (axios.isAxiosError(error)) {
