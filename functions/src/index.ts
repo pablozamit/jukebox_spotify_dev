@@ -1,6 +1,6 @@
 /* eslint-disable max-len */
-import { onRequest } from "firebase-functions/v2/https";
-import { config } from "firebase-functions";
+import {onRequest} from "firebase-functions/v2/https";
+import {config} from "firebase-functions";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import axios from "axios";
@@ -11,12 +11,12 @@ if (!admin.apps.length) {
 }
 
 // Cloud Function: searchSpotify using v2 trigger with CORS enabled
-export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
+export const searchSpotify = onRequest({cors: true}, async (req, res) => {
   logger.info("searchSpotify triggered");
 
   // Only allow GET requests
   if (req.method !== "GET") {
-    res.status(405).json({ error: "Method Not Allowed" });
+    res.status(405).json({error: "Method Not Allowed"});
     return;
   }
 
@@ -24,7 +24,7 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
   const query = req.query.q as string;
   if (!query) {
     logger.warn("Missing required query parameter 'q'");
-    res.status(400).json({ error: "Missing search parameter 'q'" });
+    res.status(400).json({error: "Missing search parameter 'q'"});
     return;
   }
   logger.info(`Search query: ${query}`);
@@ -35,7 +35,7 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
   const clientSecret = spotifyConfig?.client_secret;
   if (!clientId || !clientSecret) {
     logger.error("Spotify credentials are not configured in Firebase Functions");
-    res.status(500).json({ error: "Spotify configuration missing" });
+    res.status(500).json({error: "Spotify configuration missing"});
     return;
   }
 
@@ -44,11 +44,11 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
     logger.info("Requesting Spotify access token");
     const tokenRes = await axios.post(
       "https://accounts.spotify.com/api/token",
-      new URLSearchParams({ grant_type: "client_credentials" }).toString(),
+      new URLSearchParams({grant_type: "client_credentials"}).toString(),
       {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+          "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
         },
       }
     );
@@ -67,14 +67,14 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
     if (searchMode === "playlist") {
       if (!playlistId) {
         logger.error("Playlist ID not configured for playlist mode");
-        res.status(400).json({ error: "Playlist ID not configured" });
+        res.status(400).json({error: "Playlist ID not configured"});
         return;
       }
       logger.info(`Searching within playlist ${playlistId}`);
       const playlistRes = await axios.get(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
         {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          headers: {Authorization: `Bearer ${accessToken}`},
           params: {
             fields: "items(track(id,name,artists(name),album(name),uri,preview_url))",
             limit: 100,
@@ -95,8 +95,8 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
       const searchRes = await axios.get(
         "https://api.spotify.com/v1/search",
         {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          params: { q: query, type: "track", limit: 20 },
+          headers: {Authorization: `Bearer ${accessToken}`},
+          params: {q: query, type: "track", limit: 20},
         }
       );
       tracks = searchRes.data.tracks.items || [];
@@ -113,12 +113,12 @@ export const searchSpotify = onRequest({ cors: true }, async (req, res) => {
     }));
 
     logger.info(`Returning ${results.length} results`);
-    res.status(200).json({ results });
+    res.status(200).json({results});
   } catch (error: any) {
     logger.error("searchSpotify error:", error);
     if (axios.isAxiosError(error)) {
       logger.error("Axios error details:", error.response?.data || error.message);
     }
-    res.status(500).json({ error: error.message || "Internal Server Error" });
+    res.status(500).json({error: error.message || "Internal Server Error"});
   }
 });
