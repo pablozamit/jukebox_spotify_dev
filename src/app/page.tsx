@@ -47,12 +47,10 @@ export default function ClientPage() {
   const [isMounted, setIsMounted] = useState(false);
   const { toast } = useToast();
 
-  // Mark when component is mounted (to avoid hydration issues)
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // Check database validity
   useEffect(() => {
     if (!isDbValid) {
       setFirebaseError(
@@ -63,7 +61,6 @@ export default function ClientPage() {
     }
   }, []);
 
-  // Generate or load a simple session ID
   useEffect(() => {
     let sessionId = sessionStorage.getItem('jukeboxUserSessionId');
     if (!sessionId) {
@@ -73,16 +70,13 @@ export default function ClientPage() {
     setUserSessionId(sessionId);
   }, []);
 
-  // Load Spotify config from Realtime Database
   useEffect(() => {
     if (!db) {
       setIsLoadingConfig(false);
       return;
     }
-
     const cfgRef = ref(db, '/config');
     setIsLoadingConfig(true);
-
     const unsubscribe = onValue(
       cfgRef,
       snapshot => {
@@ -106,21 +100,17 @@ export default function ClientPage() {
         setIsLoadingConfig(false);
       }
     );
-
     return () => unsubscribe();
   }, [toast]);
 
-  // Load queue from Realtime Database
   useEffect(() => {
     if (!db) {
       setIsLoadingQueue(false);
       return;
     }
-
     console.log('PASO 1: Intentando leer la cola de Firebase...');
     const queueRef = ref(db, '/queue');
     setIsLoadingQueue(true);
-
     const unsubscribe = onValue(
       queueRef,
       snapshot => {
@@ -140,10 +130,8 @@ export default function ClientPage() {
             ...(val as any),
             timestampAdded: (val as any).order ?? (val as any).timestampAdded ?? 0
           }));
-
         setQueue(items);
         setIsLoadingQueue(false);
-
         if (userSessionId) {
           const has = items.some(song => song.addedByUserId === userSessionId);
           setCanAddSong(!has);
@@ -160,17 +148,14 @@ export default function ClientPage() {
         setIsLoadingQueue(false);
       }
     );
-
     return () => unsubscribe();
   }, [userSessionId, toast]);
 
-  // Search handler
   const handleSearch = useCallback(async () => {
     if (!searchTerm.trim() || isLoadingConfig || spotifyConfig === null) {
       setSearchResults([]);
       return;
     }
-
     setIsLoadingSearch(true);
     try {
       const results = await searchSpotify(searchTerm, spotifyConfig);
@@ -188,13 +173,11 @@ export default function ClientPage() {
     }
   }, [searchTerm, spotifyConfig, isLoadingConfig, toast]);
 
-  // Debounce search on input change
   useEffect(() => {
     const timeout = setTimeout(handleSearch, 500);
     return () => clearTimeout(timeout);
   }, [searchTerm, handleSearch]);
 
-  // Add selected song to the queue
   const handleAddSong = async (song: Song) => {
     if (!db) {
       toast({
@@ -214,10 +197,17 @@ export default function ClientPage() {
       });
       return;
     }
-
+    const alreadyInQueue = queue.some(q => q.spotifyTrackId === song.spotifyTrackId);
+    if (alreadyInQueue) {
+      toast({
+        title: 'Already in Queue',
+        description: `${song.title} is already in the queue.`,
+        variant: 'destructive'
+      });
+      return;
+    }
     const queueRef = ref(db, '/queue');
     const newRef = push(queueRef);
-
     let order: number | object = serverTimestamp();
     if (queue.length > 0) {
       const last = queue[queue.length - 1];
@@ -226,14 +216,12 @@ export default function ClientPage() {
         : 0;
       order = lastVal + 1000;
     }
-
     const newData = {
       ...song,
       addedByUserId: userSessionId,
       timestampAdded: serverTimestamp(),
       order
     };
-
     try {
       await set(newRef, newData);
       toast({
@@ -253,7 +241,6 @@ export default function ClientPage() {
     }
   };
 
-  // Show error card if Firebase is misconfigured
   if (
     firebaseError &&
     !isLoadingQueue &&
@@ -286,7 +273,6 @@ export default function ClientPage() {
     );
   }
 
-  // Main UI
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-4 min-h-screen bg-background">
       {/* Search Section */}
@@ -321,45 +307,60 @@ export default function ClientPage() {
                 </>
               ) : searchResults.length > 0 ? (
                 <ul className="space-y-2">
-                  {searchResults.map(song => (
-                    <li
-                      key={song.spotifyTrackId}
-                      className="flex items-center justify-between p-2 rounded-md hover:bg-secondary transition-colors"
-                    >
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        {song.albumArtUrl && (
-                          <img
-                            src={song.albumArtUrl}
-                            alt={`${song.title} album art`}
-                            className="h-10 w-10 rounded object-cover flex-shrink-0"
-                          />
-                        )}
-                        <div className="overflow-hidden">
-                          <p
-                            className="font-medium truncate"
-                            title={song.title}
-                          >
-                            {song.title}
-                          </p>
-                          <p
-                            className="text-sm text-muted-foreground truncate"
-                            title={song.artist}
-                          >
-                            {song.artist}
-                          </p>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleAddSong(song)}
-                        disabled={!canAddSong || !db}
-                        aria-label={`Add ${song.title} to queue`}
+                  {searchResults.map(song => {
+                    const alreadyInQueue = queue.some(
+                      q => q.spotifyTrackId === song.spotifyTrackId
+                    );
+                    return (
+                      <li
+                        key={song.spotifyTrackId}
+                        className="flex items-center justify-between p-2 rounded-md hover:bg-secondary transition-colors"
                       >
-                        <PlusCircle className="h-5 w-5" />
-                      </Button>
-                    </li>
-                  ))}
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          {song.albumArtUrl && (
+                            <img
+                              src={song.albumArtUrl}
+                              alt={`${song.title} album art`}
+                              className="h-10 w-10 rounded object-cover flex-shrink-0"
+                            />
+                          )}
+                          <div className="overflow-hidden">
+                            <p
+                              className="font-medium truncate"
+                              title={song.title}
+                            >
+                              {song.title}
+                            </p>
+                            <p
+                              className="text-sm text-muted-foreground truncate"
+                              title={song.artist}
+                            >
+                              {song.artist}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleAddSong(song)}
+                          disabled={
+                            !canAddSong || !db || alreadyInQueue
+                          }
+                          aria-label={
+                            alreadyInQueue
+                              ? `${song.title} already in queue`
+                              : `Add ${song.title} to queue`
+                          }
+                        >
+                          {alreadyInQueue ? (
+                            <CheckCircle className="h-5 w-5 text-green-500" />
+                          ) : (
+                            <PlusCircle className="h-5 w-5" />
+                          )}
+                        </Button>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="text-center text-muted-foreground py-4">
