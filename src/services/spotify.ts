@@ -18,17 +18,16 @@ export interface SpotifyConfig {
 }
 
 interface SpotifyTrack {
-    id: string;
+  id: string;
+  name: string;
+  artists: { name: string }[];
+  album: {
     name: string;
-    artists: { name: string }[];
-    album: {
-        name: string;
-        images?: { url: string }[]; // Optional images array
-    };
-    uri: string;
-    preview_url: string | null;
+    images?: { url: string }[]; // Optional images array
+  };
+  uri: string;
+  preview_url: string | null;
 }
-
 
 /**
  * Llama a tu API interna de Next.js en /api/searchSpotify
@@ -49,16 +48,21 @@ export async function searchSpotify(
   const res = await fetch(`/api/searchSpotify?${params.toString()}`);
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: 'Error desconocido al buscar en Spotify' })); // Graceful error handling for JSON parse
+    const body = await res
+      .json()
+      .catch(() => ({ error: 'Error desconocido al buscar en Spotify' }));
     throw new Error(body.error || `Error ${res.status} buscando en Spotify`);
   }
 
-   const body = await res.json();
+  const body = await res.json();
 
-   if (!body.results || !Array.isArray(body.results)) {
-      console.warn("Spotify API did not return expected 'results' array:", body);
-      return []; // Return empty array if results are missing or not an array
-   }
+  if (!body.results || !Array.isArray(body.results)) {
+    console.warn(
+      "Spotify API did not return expected 'results' array:",
+      body
+    );
+    return [];
+  }
 
   // Map the API response to the Song interface
   return (body.results as SpotifyTrack[]).map((t) => ({
@@ -66,7 +70,6 @@ export async function searchSpotify(
     title: t.name,
     artist: t.artists.map((a) => a.name).join(', '),
     // Get the first available album image URL, or null if none exist
-    albumArtUrl: t.album?.images?.[0]?.url ?? null,
+    albumArtUrl: t.album.images?.[0]?.url ?? null,
   }));
 }
-```
