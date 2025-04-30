@@ -9,9 +9,7 @@
     "sourceMap": true,
     "strict": true,
     "target": "es2017",
-    // Añadido para ignorar errores en .d.ts de librerías externas
     "skipLibCheck": true,
-    // Evita errores de mayúsculas/minúsculas en nombres de archivo
     "forceConsistentCasingInFileNames": false
   },
   "compileOnSave": true,
