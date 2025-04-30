@@ -25,7 +25,7 @@ function initializeFirebaseApp(): { app: FirebaseApp | null, dbValid: boolean } 
 
     // Check databaseURL validity separately without throwing an error immediately
      if (!firebaseConfig.databaseURL || !firebaseConfig.databaseURL.startsWith('https://')) {
-         console.warn("Firebase databaseURL is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features will be disabled.");
+         console.warn(`Firebase NEXT_PUBLIC_FIREBASE_DATABASE_URL ("${firebaseConfig.databaseURL}") is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features (like the queue) will be disabled.`);
          dbValid = false; // Mark database as invalid
      }
 
@@ -54,16 +54,30 @@ try {
     isDbValid = initResult.dbValid;
 
     if (firebaseApp) {
-        auth = getAuth(firebaseApp); // Initialize Auth if app is valid
+        // Attempt to initialize Auth only if app is valid
+        try {
+            auth = getAuth(firebaseApp);
+        } catch (authError) {
+            console.error("Failed to initialize Firebase Authentication:", authError);
+            // Decide if auth failure is critical. Here, we'll let the app continue but auth features won't work.
+            auth = null;
+        }
 
-        // Only initialize Database if the app is valid AND the DB URL was valid
-        if (isDbValid) {
-           db = getDatabase(firebaseApp);
+        // Only initialize Database if the app is valid AND the DB URL was valid during the check
+        if (isDbValid && firebaseApp) {
+           try {
+               db = getDatabase(firebaseApp);
+           } catch (dbError) {
+                console.error("Failed to initialize Firebase Realtime Database, even though URL seemed valid:", dbError);
+                db = null;
+                isDbValid = false; // Mark DB as invalid if initialization fails unexpectedly
+           }
         }
     }
 
 } catch (error) {
-    // Error already logged in initializeFirebaseApp or during getAuth/getDatabase
+    // Error during initializeFirebaseApp (config issues)
+    // Error message already logged within initializeFirebaseApp
     // Set instances to null so checks elsewhere fail gracefully
     firebaseApp = null;
     auth = null;
