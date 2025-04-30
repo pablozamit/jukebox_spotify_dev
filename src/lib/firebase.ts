@@ -12,28 +12,43 @@ const firebaseConfig = {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+// Client-side check for environment variables (for debugging)
+if (typeof window !== 'undefined') {
+    console.log("Firebase Config Loaded (Client):", {
+        apiKey: firebaseConfig.apiKey ? 'Exists' : 'MISSING',
+        authDomain: firebaseConfig.authDomain || 'MISSING',
+        databaseURL: firebaseConfig.databaseURL || 'MISSING',
+        projectId: firebaseConfig.projectId || 'MISSING',
+        // Add others if needed for debugging
+    });
+}
+
+
 function initializeFirebaseApp(): { app: FirebaseApp | null, dbValid: boolean } {
     let app: FirebaseApp | null = null;
     let dbValid = true; // Assume valid initially
 
     // Ensure required config values are present for basic app initialization
     if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId) {
-        console.error("Firebase config is missing required fields (apiKey, authDomain, projectId). Check your .env file.");
+        console.error("Firebase config is missing required fields (apiKey, authDomain, projectId). Check your .env file and ensure variables are prefixed with NEXT_PUBLIC_ if used client-side.");
         // Throw an error here because basic initialization will fail
         throw new Error("Firebase configuration is incomplete for core services.");
     }
 
     // Check databaseURL validity separately without throwing an error immediately
      if (!firebaseConfig.databaseURL || !firebaseConfig.databaseURL.startsWith('https://')) {
-         console.warn(`Firebase NEXT_PUBLIC_FIREBASE_DATABASE_URL ("${firebaseConfig.databaseURL}") is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features (like the queue) will be disabled.`);
+         console.warn(`Firebase NEXT_PUBLIC_FIREBASE_DATABASE_URL ("${firebaseConfig.databaseURL}") is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features will be disabled.`);
          dbValid = false; // Mark database as invalid
      }
 
     try {
         if (!getApps().length) {
+            console.log("Initializing Firebase App...");
             app = initializeApp(firebaseConfig);
+             console.log("Firebase App Initialized.");
         } else {
             app = getApp();
+            console.log("Using existing Firebase App instance.");
         }
     } catch (error) {
         console.error("Failed to initialize Firebase App:", error);
@@ -57,6 +72,7 @@ try {
         // Attempt to initialize Auth only if app is valid
         try {
             auth = getAuth(firebaseApp);
+            console.log("Firebase Authentication Initialized.");
         } catch (authError) {
             console.error("Failed to initialize Firebase Authentication:", authError);
             // Decide if auth failure is critical. Here, we'll let the app continue but auth features won't work.
@@ -64,14 +80,17 @@ try {
         }
 
         // Only initialize Database if the app is valid AND the DB URL was valid during the check
-        if (isDbValid && firebaseApp) {
+        if (isDbValid && firebaseApp) { // Double check firebaseApp is not null
            try {
                db = getDatabase(firebaseApp);
+               console.log("Firebase Realtime Database Initialized.");
            } catch (dbError) {
                 console.error("Failed to initialize Firebase Realtime Database, even though URL seemed valid:", dbError);
                 db = null;
                 isDbValid = false; // Mark DB as invalid if initialization fails unexpectedly
            }
+        } else if (!isDbValid) {
+            console.log("Skipping Firebase Realtime Database initialization due to invalid DATABASE_URL config.");
         }
     }
 
@@ -79,6 +98,7 @@ try {
     // Error during initializeFirebaseApp (config issues)
     // Error message already logged within initializeFirebaseApp
     // Set instances to null so checks elsewhere fail gracefully
+    console.error("Critical error during Firebase initialization process.", error);
     firebaseApp = null;
     auth = null;
     db = null;
