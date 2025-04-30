@@ -1,3 +1,4 @@
+/* eslint-disable object-curly-spacing, quote-props, max-len */
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import axios from "axios";
