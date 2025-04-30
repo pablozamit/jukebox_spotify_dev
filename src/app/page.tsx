@@ -42,14 +42,14 @@ export default function ClientPage() {
 
 
   // Check Firebase availability on mount
-   useEffect(() => {
-     // Use the flag exported from firebase.ts
-     if (!isDbValid) {
-       setFirebaseError("Firebase Database is not configured correctly (check DATABASE_URL in .env). Jukebox features are unavailable.");
-       setIsLoadingQueue(false); // Stop loading states
-       setIsLoadingConfig(false);
-     }
-   }, []);
+    useEffect(() => {
+      // Use the flag exported from firebase.ts
+      if (!isDbValid) {
+        setFirebaseError("Firebase Database is not configured correctly (check DATABASE_URL in .env). Jukebox features are unavailable.");
+        setIsLoadingQueue(false); // Stop loading states
+        setIsLoadingConfig(false);
+      }
+    }, []);
 
   // Generate or retrieve a simple user session ID
   useEffect(() => {
@@ -107,8 +107,12 @@ export default function ClientPage() {
   useEffect(() => {
     if (!db) { // Guard against using db if initialization failed
         setIsLoadingQueue(false);
-        return;
+        return; // If db is not valid, stop here for this effect
     }
+
+    // --- NUESTRO CONSOLE LOG ---
+    console.log("PASO 1: Intentando leer la cola de Firebase...");
+    // --------------------------
 
     const queueRef = ref(db, 'queue');
     setIsLoadingQueue(true);
@@ -134,14 +138,14 @@ export default function ClientPage() {
         });
       }
       setQueue(loadedQueue);
-       // Clear queue-related error on successful fetch only if no general DB error exists
-       if (isDbValid) {
-           // Clear error only if queue loading succeeds AND db is generally valid
-           // Prevents overriding DB validity error if queue loads fine
-           if (firebaseError === "Could not load the song queue. Check console for details.") {
-                setFirebaseError(null);
-           }
-       }
+        // Clear queue-related error on successful fetch only if no general DB error exists
+        if (isDbValid) {
+            // Clear error only if queue loading succeeds AND db is generally valid
+            // Prevents overriding DB validity error if queue loads fine
+            if (firebaseError === "Could not load the song queue. Check console for details.") {
+                 setFirebaseError(null);
+            }
+        }
       setIsLoadingQueue(false);
 
       // Check if the current user can add a song
@@ -210,10 +214,10 @@ export default function ClientPage() {
   const handleAddSong = async (song: Song) => {
      if (!db) { // Check if DB is available
          toast({
-            title: "Error",
-            description: "Database connection is unavailable. Cannot add song.",
-            variant: "destructive",
-         });
+             title: "Error",
+             description: "Database connection is unavailable. Cannot add song.",
+             variant: "destructive",
+          });
          return;
      }
     if (!canAddSong || !userSessionId) {
@@ -275,29 +279,29 @@ export default function ClientPage() {
 
   // Display Firebase Error if present (and DB was expected to be valid)
    if (firebaseError && !isLoadingQueue && !isLoadingConfig && isMounted) { // Show error card if error exists and not loading queue/config AND mounted
-       return (
-           <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
-               <Card className="w-full max-w-md shadow-lg border border-destructive">
-                   <CardHeader>
-                       <CardTitle className="text-destructive flex items-center gap-2">
-                           <AlertTriangle className="h-6 w-6" /> Error Occurred
-                       </CardTitle>
-                   </CardHeader>
-                   <CardContent>
-                       <p className="text-center text-destructive-foreground">{firebaseError}</p>
-                       <p className="text-center text-sm text-muted-foreground mt-2">
+        return (
+            <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
+                <Card className="w-full max-w-md shadow-lg border border-destructive">
+                    <CardHeader>
+                        <CardTitle className="text-destructive flex items-center gap-2">
+                            <AlertTriangle className="h-6 w-6" /> Error Occurred
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <p className="text-center text-destructive-foreground">{firebaseError}</p>
+                        <p className="text-center text-sm text-muted-foreground mt-2">
                          { !isDbValid
-                             ? "Please ensure Firebase is correctly set up in your environment variables (.env file), especially the DATABASE_URL."
-                             : "Please check the browser console for more details or try reloading the page."
-                         }
-                        </p>
-                   </CardContent>
-                    <CardFooter>
-                        <Button variant="outline" onClick={() => window.location.reload()}>Reload Page</Button>
-                    </CardFooter>
-               </Card>
-           </div>
-       );
+                              ? "Please ensure Firebase is correctly set up in your environment variables (.env file), especially the DATABASE_URL."
+                              : "Please check the browser console for more details or try reloading the page."
+                           }
+                         </p>
+                    </CardContent>
+                     <CardFooter>
+                         <Button variant="outline" onClick={() => window.location.reload()}>Reload Page</Button>
+                     </CardFooter>
+                </Card>
+            </div>
+        );
    }
 
 
@@ -335,10 +339,10 @@ export default function ClientPage() {
                       <div className='flex items-center gap-2 overflow-hidden'>
                          {song.albumArtUrl && (
                              <img src={song.albumArtUrl} alt={`${song.title} album art`} className="h-10 w-10 rounded object-cover flex-shrink-0"/>
-                          )}
+                         )}
                          <div className='overflow-hidden'>
-                            <p className="font-medium text-foreground truncate" title={song.title}>{song.title}</p>
-                            <p className="text-sm text-muted-foreground truncate" title={song.artist}>{song.artist}</p>
+                             <p className="font-medium text-foreground truncate" title={song.title}>{song.title}</p>
+                             <p className="text-sm text-muted-foreground truncate" title={song.artist}>{song.artist}</p>
                          </div>
                       </div>
                       <Button
@@ -366,18 +370,18 @@ export default function ClientPage() {
                 </p>
               )}
             </ScrollArea>
-              {/* Conditional rendering only when mounted to prevent hydration error */}
-              {isMounted && !canAddSong && !isLoadingQueue && isDbValid && (
+               {/* Conditional rendering only when mounted to prevent hydration error */}
+               {isMounted && !canAddSong && !isLoadingQueue && isDbValid && (
                  <p className="text-sm text-center text-destructive mt-2 px-2">
                    You can add another song after yours has played or been removed.
                  </p>
                )}
-              {/* Conditional rendering only when mounted */}
-              {isMounted && !isDbValid && (
+               {/* Conditional rendering only when mounted */}
+               {isMounted && !isDbValid && (
                  <p className="text-xs text-center text-destructive/80 mt-1 px-2">
                      Database connection issues might prevent adding songs.
                  </p>
-              )}
+               )}
           </CardContent>
         </Card>
       </div>
@@ -404,7 +408,7 @@ export default function ClientPage() {
                        </div>
                        <Skeleton className="h-6 w-6 rounded-full" />
                      </div>
-                    ))}
+                   ))}
                  </div>
                ) : queue.length > 0 ? (
                  <ul className="space-y-3">
@@ -414,16 +418,16 @@ export default function ClientPage() {
                        {song.albumArtUrl ? (
                            <img src={song.albumArtUrl} alt={`${song.title} album art`} className="h-10 w-10 rounded object-cover flex-shrink-0"/>
                        ) : (
-                          <div className="h-10 w-10 rounded bg-muted flex items-center justify-center flex-shrink-0">
-                            <Music className="h-5 w-5 text-muted-foreground" />
-                          </div>
+                         <div className="h-10 w-10 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                           <Music className="h-5 w-5 text-muted-foreground" />
+                         </div>
                        )}
                        <div className="flex-grow overflow-hidden">
                          <p className="font-medium text-foreground truncate" title={song.title}>{song.title}</p>
                          <p className="text-sm text-muted-foreground truncate" title={song.artist}>{song.artist}</p>
                        </div>
                        {song.addedByUserId === userSessionId && (
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 ml-auto" title="Added by you"/>
+                         <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 ml-auto" title="Added by you"/>
                        )}
                      </li>
                    ))}
@@ -438,12 +442,12 @@ export default function ClientPage() {
           </CardContent>
            {/* Conditional rendering based on mounted state */}
            {isMounted && !isDbValid && (
-                <CardFooter className="border-t px-6 py-3 bg-destructive/10">
-                    <p className="text-sm text-destructive flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4" /> Queue features are unavailable due to a database configuration error.
-                    </p>
-                </CardFooter>
-            )}
+                 <CardFooter className="border-t px-6 py-3 bg-destructive/10">
+                     <p className="text-sm text-destructive flex items-center gap-2">
+                         <AlertTriangle className="h-4 w-4" /> Queue features are unavailable due to a database configuration error.
+                     </p>
+                 </CardFooter>
+             )}
         </Card>
       </div>
     </div>
