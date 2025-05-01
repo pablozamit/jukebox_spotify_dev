@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
   // Validar que las variables de entorno estén cargadas
   if (!clientId || !clientSecret || !redirectUri) {
     console.error('Spotify API credentials missing in environment variables.');
-    return NextResponse.redirect(new URL('/admin?error=config_missing', request.url));
+    // Redirección CORREGIDA:
+    return NextResponse.redirect('/admin?error=config_missing');
   }
 
   try {
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     // ❸ Validar el 'state' contra el almacenado en la cookie (CON AWAIT)
     // Obtén el objeto de cookies esperando la promesa
-    const cookieStore = await cookies(); // <--- AÑADIDO 'await' AQUÍ
+    const cookieStore = await cookies();
     const storedState = cookieStore.get('spotify_auth_state')?.value;
 
     // Es mejor borrar la cookie DESPUÉS de haberla validado
@@ -40,7 +41,8 @@ export async function GET(request: NextRequest) {
          cookieStore.delete('spotify_auth_state');
       }
       console.error('State mismatch error. Potential CSRF attack.');
-      return NextResponse.redirect(new URL('/admin?error=state_mismatch', request.url));
+      // Redirección CORREGIDA:
+      return NextResponse.redirect('/admin?error=state_mismatch');
     }
     // Si el state es válido, borramos la cookie ahora sí
     cookieStore.delete('spotify_auth_state');
@@ -49,13 +51,15 @@ export async function GET(request: NextRequest) {
     // Manejar error devuelto por Spotify (ej. usuario canceló)
     if (error) {
       console.error('Spotify OAuth error parameter:', error);
-      return NextResponse.redirect(new URL(`/admin?error=${encodeURIComponent(error)}`, request.url));
+      // Redirección CORREGIDA:
+      return NextResponse.redirect(`/admin?error=${encodeURIComponent(error)}`);
     }
 
     // Asegurar que tenemos el código
     if (!code) {
       console.error('Missing authorization code from Spotify.');
-      return NextResponse.redirect(new URL('/admin?error=no_code', request.url));
+      // Redirección CORREGIDA:
+      return NextResponse.redirect('/admin?error=no_code');
     }
 
     // ❹ Intercambiar el código por tokens usando axios
@@ -92,26 +96,33 @@ export async function GET(request: NextRequest) {
 
     const expiresAt = Date.now() + expires_in * 1000;
 
-    // ❺ Guardar en RTDB usando la instancia 'adminDb' importada
-    await adminDb
-      .ref('/spotifyTokens') // Ruta donde guardar los tokens
-      .set({
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresAt: expiresAt,
-      });
-
-    console.log('Spotify tokens successfully obtained and stored in RTDB.');
+    // ❺ Guardar en RTDB usando la instancia 'adminDb' importada (CON NULL CHECK)
+    if (adminDb) { // <-- COMPROBACIÓN AÑADIDA
+      await adminDb
+        .ref('/spotifyTokens') // Ruta donde guardar los tokens
+        .set({
+          accessToken: access_token,
+          refreshToken: refresh_token,
+          expiresAt: expiresAt,
+        });
+      console.log('Spotify tokens successfully obtained and stored in RTDB.');
+    } else {
+      // La inicialización de Firebase Admin debe haber fallado antes
+      console.error('Firebase Admin DB is not available (adminDb is null). Cannot save Spotify tokens.');
+      // Lanzar un error aquí para que se capture en el catch general
+      throw new Error('Firebase Admin DB not available');
+    }
 
     // ❻ Redirigir de vuelta al admin con mensaje de éxito
-    return NextResponse.redirect(new URL('/admin?success=spotify_connected', request.url));
+    // Redirección CORREGIDA:
+    return NextResponse.redirect('/admin?success=spotify_connected');
 
   } catch (e: any) {
     // Captura errores de red (axios), errores de lógica, o errores de escritura en DB
-    // Intenta obtener un mensaje más específico del error si es un error de Axios
     const errorMessage = e.response?.data?.error_description || e.response?.data?.error || e.message || 'Unknown callback error';
     console.error('Error in Spotify OAuth callback:', errorMessage, e);
     // Redirigir con flag de error genérico o específico si es posible
-    return NextResponse.redirect(new URL(`/admin?error=${encodeURIComponent(errorMessage)}`, request.url));
+    // Redirección CORREGIDA:
+    return NextResponse.redirect(`/admin?error=${encodeURIComponent(errorMessage)}`);
   }
 }
