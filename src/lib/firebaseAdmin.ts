@@ -1,46 +1,45 @@
-// src/lib/firebaseAdmin.ts
+// src/lib/firebaseAdmin.ts (Versión para usar Application Default Credentials)
 import * as admin from 'firebase-admin';
 
 // Evita inicializaciones múltiples en desarrollo
 if (!admin.apps.length) {
   try {
-    // Asegúrate de que las variables de entorno del SERVIDOR estén disponibles aquí
-    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID; // Puedes usar NEXT_PUBLIC_ si ya lo tienes
-    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-    const databaseURL = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL; // Puedes usar NEXT_PUBLIC_ si ya lo tienes
+    // Lee solo las variables necesarias que NO son credenciales explícitas
+    const databaseURL = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
 
-    if (!projectId || !clientEmail || !privateKey || !databaseURL) {
-        throw new Error("Missing Firebase Admin SDK credentials in server environment variables (PROJECT_ID, CLIENT_EMAIL, PRIVATE_KEY, DATABASE_URL)");
+    if (!databaseURL) {
+        // databaseURL sigue siendo útil para la conexión RTDB
+        throw new Error("Missing Firebase DATABASE_URL in environment variables.");
     }
 
+    // Inicializa SIN especificar credenciales.
+    // El SDK buscará automáticamente las Application Default Credentials (ADC)
+    // configuradas mediante `gcloud auth application-default login`.
     admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: projectId,
-        clientEmail: clientEmail,
-        // ¡IMPORTANTE! Reemplaza los \\n escapados del .env por \n reales
-        privateKey: privateKey.replace(/\\n/g, '\n'),
-      }),
       databaseURL: databaseURL,
+      // NO incluimos la opción 'credential' aquí
     });
-    console.log('Firebase Admin SDK Initialized (from lib/firebaseAdmin.ts)');
-  } catch (error: any) { // <--- PRIMER CATCH BLOCK
-     console.error("Firebase Admin SDK Initialization Error in firebaseAdmin.ts:", error.message);
-     // AÑADIDO/DESCOMENTADO: Lanza el error para detener la ejecución aquí y ver el problema real
+
+    console.log('Firebase Admin SDK Initialized using Application Default Credentials (ADC) (from lib/firebaseAdmin.ts)');
+
+  } catch (error: any) {
+     // Este catch ahora atrapará errores si ADC no está configurado o si hay otros problemas de inicialización
+     console.error("Firebase Admin SDK Initialization Error (using ADC):", error.message);
+     // Relanzamos el error para detener la ejecución si falla
      throw error;
   }
 }
 
 // Exporta solo los servicios que necesites desde el Admin SDK
-// Asegúrate de que la inicialización haya ocurrido antes de intentar acceder a la DB
 let adminDbInstance: admin.database.Database;
 try {
+    // Intenta obtener la instancia de la base de datos
+    // Esto fallará si initializeApp no tuvo éxito
     adminDbInstance = admin.database();
-} catch (error) { // <--- SEGUNDO CATCH BLOCK (ahora no debería llegar aquí si la inicialización falla)
-    console.error("Failed to get Firebase Admin Database instance. Was initialization successful?", error);
-    // Lanza un error o maneja esto como prefieras, pero usar la DB fallará si la app no se inicializó.
-    throw new Error("Could not get Firebase Admin Database instance.");
+} catch (error) {
+    console.error("Failed to get Firebase Admin Database instance using ADC. Was initialization successful?", error);
+    throw new Error("Could not get Firebase Admin Database instance (using ADC).");
 }
 
 export const adminDb = adminDbInstance;
-// export const adminAuth = admin.auth(); // Exporta si necesitas Auth de admin
+// export const adminAuth = admin.auth();
