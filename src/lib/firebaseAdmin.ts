@@ -24,10 +24,10 @@ if (!admin.apps.length) {
       databaseURL: databaseURL,
     });
     console.log('Firebase Admin SDK Initialized (from lib/firebaseAdmin.ts)');
-  } catch (error: any) {
+  } catch (error: any) { // <--- PRIMER CATCH BLOCK
      console.error("Firebase Admin SDK Initialization Error in firebaseAdmin.ts:", error.message);
-     // Puedes decidir si quieres lanzar el error o simplemente loggearlo
-     // throw error;
+     // AÑADIDO/DESCOMENTADO: Lanza el error para detener la ejecución aquí y ver el problema real
+     throw error;
   }
 }
 
@@ -36,7 +36,7 @@ if (!admin.apps.length) {
 let adminDbInstance: admin.database.Database;
 try {
     adminDbInstance = admin.database();
-} catch (error) {
+} catch (error) { // <--- SEGUNDO CATCH BLOCK (ahora no debería llegar aquí si la inicialización falla)
     console.error("Failed to get Firebase Admin Database instance. Was initialization successful?", error);
     // Lanza un error o maneja esto como prefieras, pero usar la DB fallará si la app no se inicializó.
     throw new Error("Could not get Firebase Admin Database instance.");
