@@ -1,58 +1,61 @@
 // src/app/api/spotify/callback/route.ts
 
-import { NextRequest, NextResponse } from 'next/server'
-// ❶ Usa sólo Admin SDK, inicializado con ADC
-import * as admin from 'firebase-admin'
+// ➤ Este endpoint hace uso de Admin SDK y debe correr en Node.js
+export const runtime = 'nodejs';
 
+import { NextRequest, NextResponse } from 'next/server';
+import * as admin from 'firebase-admin';
+import axios from 'axios';
+import { cookies } from 'next/headers';
+
+// ❶ Inicializa Admin SDK usando ADC (gcloud auth application-default login)
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
     databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-  })
+  });
 }
 
-// Importa las funciones de client‐sdk si las quisieras usar, pero aquí guardamos con Admin SDK
-import axios from 'axios'
-import { cookies } from 'next/headers'
-
 export async function GET(request: NextRequest) {
-  const clientId     = process.env.SPOTIFY_CLIENT_ID
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET
-  const redirectUri  = process.env.SPOTIFY_REDIRECT_URI
+  const clientId     = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  const redirectUri  = process.env.SPOTIFY_REDIRECT_URI;
 
   if (!clientId || !clientSecret || !redirectUri) {
-    console.error('Spotify API credentials missing in environment variables.')
-    return NextResponse.redirect('/admin?error=config_missing')
+    console.error('Faltan credenciales de Spotify en las env vars.');
+    return NextResponse.redirect('/admin?error=config_missing');
   }
 
   try {
-    const { searchParams } = new URL(request.url)
-    const code  = searchParams.get('code')
-    const error = searchParams.get('error')
-    const state = searchParams.get('state')
+    const { searchParams } = new URL(request.url);
+    const code  = searchParams.get('code');
+    const error = searchParams.get('error');
+    const state = searchParams.get('state');
 
-    // ❷ CSRF: validamos “state” con la cookie
-    const cookieStore  = await cookies()
-    const storedState  = cookieStore.get('spotify_auth_state')?.value
+    // ❷ CSRF: validamos “state” contra la cookie
+    const cookieStore = await cookies();
+    const storedState = cookieStore.get('spotify_auth_state')?.value;
 
     if (!state || state !== storedState) {
-      if (storedState) cookieStore.delete('spotify_auth_state')
-      console.error('State mismatch error. Potential CSRF attack.')
-      return NextResponse.redirect('/admin?error=state_mismatch')
+      // limpiamos la cookie si existe
+      if (storedState) cookieStore.delete('spotify_auth_state');
+      console.error('State mismatch. Posible ataque CSRF.');
+      return NextResponse.redirect('/admin?error=state_mismatch');
     }
-    // Si coincide, borramos la cookie
-    cookieStore.delete('spotify_auth_state')
+    // state válido: borramos la cookie
+    cookieStore.delete('spotify_auth_state');
 
+    // ¿Spotify devolvió un error?
     if (error) {
-      console.error('Spotify OAuth error parameter:', error)
-      return NextResponse.redirect(`/admin?error=${encodeURIComponent(error)}`)
+      console.error('Spotify OAuth error:', error);
+      return NextResponse.redirect(`/admin?error=${encodeURIComponent(error)}`);
     }
     if (!code) {
-      console.error('Missing authorization code from Spotify.')
-      return NextResponse.redirect('/admin?error=no_code')
+      console.error('Falta código de autorización.');
+      return NextResponse.redirect('/admin?error=no_code');
     }
 
-    // ❸ Intercambiamos el código por tokens
+    // ❸ Intercambiamos código por tokens
     const tokenRes = await axios.post(
       'https://accounts.spotify.com/api/token',
       new URLSearchParams({
@@ -68,20 +71,20 @@ export async function GET(request: NextRequest) {
             Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
         },
       }
-    )
+    );
 
     if (tokenRes.status !== 200 || !tokenRes.data) {
-      console.error('Invalid response from Spotify token endpoint:', tokenRes.status, tokenRes.data)
-      throw new Error('Failed to get tokens from Spotify')
+      console.error('Respuesta inválida del endpoint de token de Spotify:', tokenRes.status, tokenRes.data);
+      throw new Error('Failed to get tokens from Spotify');
     }
 
-    const { access_token, refresh_token, expires_in } = tokenRes.data
+    const { access_token, refresh_token, expires_in } = tokenRes.data;
     if (!access_token || !refresh_token || typeof expires_in !== 'number') {
-      console.error('Incomplete token data received:', tokenRes.data)
-      throw new Error('Incomplete token data from Spotify')
+      console.error('Datos de token incompletos:', tokenRes.data);
+      throw new Error('Incomplete token data from Spotify');
     }
 
-    const expiresAt = Date.now() + expires_in * 1000
+    const expiresAt = Date.now() + expires_in * 1000;
 
     // ❹ Guardamos los tokens en RTDB bajo /admin/spotify/tokens
     try {
@@ -92,20 +95,21 @@ export async function GET(request: NextRequest) {
           accessToken:  access_token,
           refreshToken: refresh_token,
           expiresAt,
-        })
-      console.log('Spotify tokens successfully stored in RTDB.')
-      return NextResponse.redirect('/admin?success=spotify_connected')
+        });
+      console.log('Tokens de Spotify guardados correctamente en RTDB.');
+      return NextResponse.redirect('/admin?success=spotify_connected');
     } catch (dbErr: any) {
-      console.error('Error saving Spotify tokens in RTDB:', dbErr)
-      return NextResponse.redirect('/admin?error=token_save_failed')
+      console.error('Error al guardar tokens en RTDB:', dbErr);
+      return NextResponse.redirect('/admin?error=token_save_failed');
     }
 
   } catch (e: any) {
-    const msg = e.response?.data?.error_description
-             || e.response?.data?.error
-             || e.message
-             || 'Unknown callback error'
-    console.error('Error in Spotify OAuth callback:', msg, e)
-    return NextResponse.redirect(`/admin?error=${encodeURIComponent(msg)}`)
+    const msg =
+      e.response?.data?.error_description ||
+      e.response?.data?.error ||
+      e.message ||
+      'Unknown callback error';
+    console.error('Error en callback de Spotify:', msg, e);
+    return NextResponse.redirect(`/admin?error=${encodeURIComponent(msg)}`);
   }
 }

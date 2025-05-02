@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import axios from 'axios'
 import * as admin from 'firebase-admin'
 
-// ❶ Inicializa Admin SDK usando Application Default Credentials si aún no está hecho
+// ❶ Inicializa Admin SDK usando ADC si aún no está hecho
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
@@ -17,8 +17,8 @@ const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!
 
 export async function GET() {
   try {
-    // ❷ Leemos los tokens guardados en RTDB bajo /spotifyTokens
-    const snap = await admin.database().ref('/spotifyTokens').once('value')
+    // ❷ Leemos los tokens guardados en RTDB bajo /admin/spotify/tokens
+    const snap = await admin.database().ref('/admin/spotify/tokens').once('value')
     const tokens = snap.val() as
       | { accessToken: string; refreshToken: string; expiresAt: number }
       | null
@@ -33,7 +33,7 @@ export async function GET() {
     let accessToken = tokens.accessToken
     const now = Date.now()
 
-    // ❸ Si expiró, lo refrescamos
+    // ❸ Si expiró, lo refrescamos y actualizamos RTDB
     if (now >= tokens.expiresAt) {
       const resp = await axios.post(
         'https://accounts.spotify.com/api/token',
@@ -53,14 +53,13 @@ export async function GET() {
       accessToken = resp.data.access_token
       const newExpiry = Date.now() + resp.data.expires_in * 1000
 
-      // ❸.1 Actualizamos la DB con el nuevo token y su expiry
       await admin
         .database()
-        .ref('/spotifyTokens')
+        .ref('/admin/spotify/tokens')
         .update({ accessToken, expiresAt: newExpiry })
     }
 
-    // ❹ Llamamos a Spotify para saber qué suena ahora
+    // ❹ Consultamos Spotify qué está sonando
     const playerRes = await axios.get(
       'https://api.spotify.com/v1/me/player/currently-playing',
       { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -77,7 +76,7 @@ export async function GET() {
       return NextResponse.json({ isPlaying: false })
     }
 
-    // ❺ Mapear respuesta a nuestro formato
+    // ❺ Formateamos la respuesta
     const track = {
       id:          item.id,
       name:        item.name,
