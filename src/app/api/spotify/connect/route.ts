@@ -1,32 +1,42 @@
 // src/app/api/spotify/connect/route.ts
 
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers'; // Importa la función cookies
+import { cookies } from 'next/headers';
 
 export async function GET() {
-  const state = Math.random().toString(36).slice(2); // Genera el state
-  const cookieStore = await cookies(); // Obtiene el objeto de cookies (Promesa resuelta)
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+  if (!clientId || !redirectUri) {
+    console.error('Missing SPOTIFY_CLIENT_ID or SPOTIFY_REDIRECT_URI');
+    return NextResponse.json(
+      { error: 'Spotify OAuth not configured on the server.' },
+      { status: 500 }
+    );
+  }
 
-  // Guarda el state en una cookie
+  // ❶ Generar un state aleatorio para CSRF
+  const state = Math.random().toString(36).slice(2);
+
+  // ❷ Guardarlo en cookie HTTP-only
+  const cookieStore = await cookies();
   cookieStore.set({
     name: 'spotify_auth_state',
     value: state,
-    httpOnly: true, // Solo accesible por el servidor
-    secure: process.env.NODE_ENV === 'production', // Solo en HTTPS en producción
-    path: '/api/spotify/callback', // Para que la cookie esté disponible en la ruta de callback
-    maxAge: 3600, // O el tiempo que consideres adecuado
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/api/spotify/callback',  // también funciona para cualquier subruta de callback
+    maxAge: 60 * 60,               // 1 hora
   });
 
+  // ❸ Construir la URL de autorización de Spotify
   const params = new URLSearchParams({
-    client_id:     process.env.SPOTIFY_CLIENT_ID!,
+    client_id:     clientId,
     response_type: 'code',
-    redirect_uri:  process.env.SPOTIFY_REDIRECT_URI!,
+    redirect_uri:  redirectUri,
     scope:         'user-modify-playback-state user-read-playback-state',
-    state:         state, // Usa el state generado
+    state,
   });
 
-  const spotifyAuthUrl = new URL('https://accounts.spotify.com/authorize');
-  spotifyAuthUrl.search = params.toString();
-
-  return NextResponse.redirect(spotifyAuthUrl.href);
+  const spotifyAuthUrl = `https://accounts.spotify.com/authorize?${params.toString()}`;
+  return NextResponse.redirect(spotifyAuthUrl);
 }

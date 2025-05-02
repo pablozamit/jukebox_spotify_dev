@@ -33,7 +33,7 @@ export async function GET() {
     let accessToken = tokens.accessToken
     const now = Date.now()
 
-    // ❸ Si expiró, refrescamos
+    // ❸ Si expiró, lo refrescamos
     if (now >= tokens.expiresAt) {
       const resp = await axios.post(
         'https://accounts.spotify.com/api/token',
@@ -92,7 +92,7 @@ export async function GET() {
       track,
     })
   } catch (e: any) {
-    console.error('Error en /api/spotify/currently-playing:', e)
+    console.error('Error en /api/spotify/current/route.ts:', e)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

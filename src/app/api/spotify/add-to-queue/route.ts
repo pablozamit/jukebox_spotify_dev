@@ -4,11 +4,10 @@ import { NextResponse } from 'next/server'
 import axios from 'axios'
 import * as admin from 'firebase-admin'
 
-// ❶ Inicializa Admin SDK usando Application Default Credentials
+// ❶ Inicializa Admin SDK usando ADC (gcloud auth application-default login)
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
-    // Asegúrate de que esta URL coincide con tu RTDB
     databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
   })
 }
@@ -18,20 +17,19 @@ const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!
 
 export async function POST(request: Request) {
   try {
-    // ❷ Obtenemos el trackId del JSON
+    // ❷ Leemos trackId del body
     const { trackId } = await request.json()
     if (!trackId) {
-      return NextResponse.json(
-        { error: 'trackId is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'trackId is required' }, { status: 400 })
     }
 
-    // ❸ Leemos los tokens guardados en RTDB bajo /spotifyTokens
-    const snap = await admin.database().ref('/spotifyTokens').once('value')
-    const tokens = snap.val() as
-      | { accessToken: string; refreshToken: string; expiresAt: number }
-      | null
+    // ❸ Leemos tokens de RTDB en /admin/spotify/tokens
+    const snap = await admin.database().ref('/admin/spotify/tokens').once('value')
+    const tokens = snap.val() as {
+      accessToken: string
+      refreshToken: string
+      expiresAt: number
+    } | null
 
     if (!tokens) {
       return NextResponse.json(
@@ -43,7 +41,7 @@ export async function POST(request: Request) {
     let accessToken = tokens.accessToken
     const now = Date.now()
 
-    // ❹ Si el token expiró, lo refrescamos
+    // ❹ Si el token expiró, refrescamos y actualizamos RTDB
     if (now >= tokens.expiresAt) {
       const resp = await axios.post(
         'https://accounts.spotify.com/api/token',
@@ -64,14 +62,13 @@ export async function POST(request: Request) {
       accessToken = resp.data.access_token
       const newExpiry = Date.now() + resp.data.expires_in * 1000
 
-      // ❹.1 Actualizamos la DB con el nuevo token y su expiry
       await admin
         .database()
-        .ref('/spotifyTokens')
+        .ref('/admin/spotify/tokens')
         .update({ accessToken, expiresAt: newExpiry })
     }
 
-    // ❺ Llamamos a la API de Spotify para encolar la canción
+    // ❺ Encolamos la pista con el accessToken válido
     const queueRes = await fetch(
       `https://api.spotify.com/v1/me/player/queue?uri=spotify:track:${trackId}`,
       {
@@ -88,13 +85,10 @@ export async function POST(request: Request) {
       )
     }
 
-    // ❻ Devolvemos éxito
+    // ❻ Todo OK
     return NextResponse.json({ success: true })
   } catch (e: any) {
     console.error('add-to-queue error:', e)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
