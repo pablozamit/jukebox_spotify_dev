@@ -25,7 +25,7 @@ export async function GET() {
     state:         state, // Usa el state generado
   });
 
-  const spotifyAuthUrl = new URL('https://community.spotify.com/t5/Desktop-Mac/Spotify-ignores-SOCKS-proxy-for-device-discovery/td-p/69379076');
+  const spotifyAuthUrl = new URL('https://accounts.spotify.com/authorize');
   spotifyAuthUrl.search = params.toString();
 
   return NextResponse.redirect(spotifyAuthUrl.href);
