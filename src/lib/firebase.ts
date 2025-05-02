@@ -36,16 +36,16 @@ function initializeFirebaseApp(): { app: FirebaseApp | null, dbValid: boolean } 
     }
 
     // Check databaseURL validity separately without throwing an error immediately
-     if (!firebaseConfig.databaseURL || !firebaseConfig.databaseURL.startsWith('https://')) {
-         console.warn(`Firebase NEXT_PUBLIC_FIREBASE_DATABASE_URL ("${firebaseConfig.databaseURL}") is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features will be disabled.`);
-         dbValid = false; // Mark database as invalid
-     }
+    if (!firebaseConfig.databaseURL || !firebaseConfig.databaseURL.startsWith('https://')) {
+        console.warn(`Firebase NEXT_PUBLIC_FIREBASE_DATABASE_URL ("${firebaseConfig.databaseURL}") is missing or invalid in .env. It should start with 'https://'. Firebase Realtime Database features will be disabled.`);
+        dbValid = false; // Mark database as invalid
+    }
 
     try {
         if (!getApps().length) {
             console.log("Initializing Firebase App...");
             app = initializeApp(firebaseConfig);
-             console.log("Firebase App Initialized.");
+            console.log("Firebase App Initialized.");
         } else {
             app = getApp();
             console.log("Using existing Firebase App instance.");
@@ -60,7 +60,7 @@ function initializeFirebaseApp(): { app: FirebaseApp | null, dbValid: boolean } 
 
 let firebaseApp: FirebaseApp | null = null;
 let auth: Auth | null = null;
-let db: Database | null = null;
+let db: Database | null = null; // Declaramos db como Database | null inicialmente
 let isDbValid = false; // Track if DB config was valid during init
 
 try {
@@ -81,14 +81,14 @@ try {
 
         // Only initialize Database if the app is valid AND the DB URL was valid during the check
         if (isDbValid && firebaseApp) { // Double check firebaseApp is not null
-           try {
-               db = getDatabase(firebaseApp);
-               console.log("Firebase Realtime Database Initialized.");
-           } catch (dbError) {
+            try {
+                db = getDatabase(firebaseApp);
+                console.log("Firebase Realtime Database Initialized.");
+            } catch (dbError) {
                 console.error("Failed to initialize Firebase Realtime Database, even though URL seemed valid:", dbError);
                 db = null;
-                isDbValid = false; // Mark DB as invalid if initialization fails unexpectedly
-           }
+                isDbValid = false;
+            }
         } else if (!isDbValid) {
             console.log("Skipping Firebase Realtime Database initialization due to invalid DATABASE_URL config.");
         }
@@ -106,4 +106,4 @@ try {
 }
 
 
-export { firebaseApp, auth, db, isDbValid }; // Export isDbValid if needed elsewhere
+export { firebaseApp, auth, db, isDbValid };

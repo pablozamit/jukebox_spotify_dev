@@ -1,14 +1,14 @@
 // src/app/api/spotify/callback/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-// ❶ Importa SÓLO el servicio de DB desde tu archivo de inicialización central
-import { adminDb } from '@/lib/firebaseAdmin'; // Asegúrate que este archivo existe y es correcto
+// ❶ Importa SÓLO el servicio de DB desde tu archivo de inicialización central del Client SDK
+import { db } from '@/lib/firebase'; // Asegúrate que este archivo existe y es correcto para el Client SDK
+// Importa las funciones necesarias del Client SDK para la base de datos
+import { ref, set } from 'firebase/database';
 // Importa cookies para manejar el 'state' de seguridad CSRF
 import { cookies } from 'next/headers';
 // Puedes seguir usando axios si lo prefieres, o cambiar a fetch
 import axios from 'axios';
-
-// ❷ ELIMINADO: Bloque de inicialización de Firebase Admin que causaba el error
 
 export async function GET(request: NextRequest) {
   // Leer variables de entorno aquí dentro para mayor seguridad
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     if (!state || state !== storedState) {
       // Borrar la cookie incluso si hay error para limpiar
       if (storedState) { // Solo si existía
-         cookieStore.delete('spotify_auth_state');
+        cookieStore.delete('spotify_auth_state');
       }
       console.error('State mismatch error. Potential CSRF attack.');
       // Redirección CORREGIDA:
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
 
     // ❹ Intercambiar el código por tokens usando axios
     const tokenRes = await axios.post(
-      'https://accounts.spotify.com/api/token',
+      'https://accounts.spotify.com/api/token', // URL CORRECTA del endpoint de token de Spotify
       new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
@@ -82,40 +82,39 @@ export async function GET(request: NextRequest) {
 
     // Validar la respuesta de Spotify
     if (tokenRes.status !== 200 || !tokenRes.data) {
-         console.error('Invalid response from Spotify token endpoint:', tokenRes.status, tokenRes.data);
-         throw new Error('Failed to get tokens from Spotify');
+      console.error('Invalid response from Spotify token endpoint:', tokenRes.status, tokenRes.data);
+      throw new Error('Failed to get tokens from Spotify');
     }
 
     const { access_token, refresh_token, expires_in } = tokenRes.data;
 
     // Comprobar que recibimos los tokens esperados
-     if (!access_token || !refresh_token || typeof expires_in !== 'number') {
-        console.error('Incomplete token data received:', tokenRes.data);
-        throw new Error('Incomplete token data from Spotify');
-     }
+    if (!access_token || !refresh_token || typeof expires_in !== 'number') {
+      console.error('Incomplete token data received:', tokenRes.data);
+      throw new Error('Incomplete token data from Spotify');
+    }
 
     const expiresAt = Date.now() + expires_in * 1000;
 
-    // ❺ Guardar en RTDB usando la instancia 'adminDb' importada (CON NULL CHECK)
-    if (adminDb) { // <-- COMPROBACIÓN AÑADIDA
-      await adminDb
-        .ref('/spotifyTokens') // Ruta donde guardar los tokens
-        .set({
+    // ❺ Guardar en RTDB usando el Client SDK
+    try {
+      if (db) {
+        const adminSpotifyRef = ref(db, 'admin/spotify/tokens'); // Guarda los tokens bajo un nodo 'tokens'
+        await set(adminSpotifyRef, {
           accessToken: access_token,
           refreshToken: refresh_token,
           expiresAt: expiresAt,
         });
-      console.log('Spotify tokens successfully obtained and stored in RTDB.');
-    } else {
-      // La inicialización de Firebase Admin debe haber fallado antes
-      console.error('Firebase Admin DB is not available (adminDb is null). Cannot save Spotify tokens.');
-      // Lanzar un error aquí para que se capture en el catch general
-      throw new Error('Firebase Admin DB not available');
+        console.log('Spotify tokens successfully obtained and stored in RTDB using Client SDK.');
+        return NextResponse.redirect('/admin?success=spotify_connected_client_sdk'); // Mensaje diferente para distinguir
+      } else {
+        console.error('Error: Firebase Client SDK database instance is null. Cannot save tokens.');
+        return NextResponse.redirect('/admin?error=db_not_available');
+      }
+    } catch (error: any) {
+      console.error('Error saving Spotify tokens with Client SDK:', error);
+      return NextResponse.redirect('/admin?error=token_save_failed_client_sdk');
     }
-
-    // ❻ Redirigir de vuelta al admin con mensaje de éxito
-    // Redirección CORREGIDA:
-    return NextResponse.redirect('/admin?success=spotify_connected');
 
   } catch (e: any) {
     // Captura errores de red (axios), errores de lógica, o errores de escritura en DB
