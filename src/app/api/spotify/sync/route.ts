@@ -1,10 +1,10 @@
-// app/api/spotify/sync/route.ts
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 import * as admin from 'firebase-admin';
 
+// Inicializar Admin SDK si no está activo
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
@@ -17,6 +17,7 @@ const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 
 export async function POST() {
   try {
+    // Leer tokens desde Firebase
     const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
     const tokens = snap.val();
 
@@ -27,6 +28,7 @@ export async function POST() {
     let accessToken = tokens.accessToken;
     const now = Date.now();
 
+    // Refrescar token si expiró
     if (now >= tokens.expiresAt) {
       const res = await axios.post(
         'https://accounts.spotify.com/api/token',
@@ -37,7 +39,9 @@ export async function POST() {
         {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            Authorization: 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
+            Authorization:
+              'Basic ' +
+              Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
           },
         }
       );
@@ -51,6 +55,7 @@ export async function POST() {
       });
     }
 
+    // Leer la cola de canciones
     const queueSnap = await admin.database().ref('/queue').once('value');
     const queueData = queueSnap.val();
 
@@ -64,37 +69,55 @@ export async function POST() {
       votes: val.votes ?? 0,
     }));
 
-    const sorted = songs.sort((a, b) => b.votes - a.votes || (a.order ?? 0) - (b.order ?? 0));
+    if (songs.length === 0) {
+      return NextResponse.json({ message: 'No songs in queue' });
+    }
+
+    // Ordenar por votos y luego por orden de llegada
+    const sorted = songs.sort((a, b) => {
+      const votesA = a.votes ?? 0;
+      const votesB = b.votes ?? 0;
+      if (votesB !== votesA) return votesB - votesA;
+      const orderA = typeof a.order === 'number' ? a.order : 0;
+      const orderB = typeof b.order === 'number' ? b.order : 0;
+      return orderA - orderB;
+    });
+
     const topSong = sorted[0];
 
-    if (!topSong) {
-      return NextResponse.json({ message: 'No top song found' });
+    if (!topSong || !topSong.spotifyTrackId) {
+      return NextResponse.json({ message: 'No valid top song found' });
     }
 
-    const addRes = await fetch(
-      `https://api.spotify.com/v1/me/player/play`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          uris: [`spotify:track:${topSong.spotifyTrackId}`],
-        }),
-      }
-    );
+    // Reproducir la canción directamente
+    const playRes = await fetch('https://api.spotify.com/v1/me/player/play', {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        uris: [`spotify:track:${topSong.spotifyTrackId}`],
+      }),
+    });
 
-    if (!addRes.ok) {
-      const err = await addRes.json().catch(() => ({}));
-      return NextResponse.json({ error: err.error?.message || 'Failed to play track' }, { status: addRes.status });
+    if (!playRes.ok) {
+      const err = await playRes.json().catch(() => ({}));
+      return NextResponse.json(
+        { error: err.error?.message || 'Failed to play track' },
+        { status: playRes.status }
+      );
     }
 
+    // Eliminar canción de la cola
     await admin.database().ref(`/queue/${topSong.id}`).remove();
 
     return NextResponse.json({ success: true, played: topSong });
   } catch (e: any) {
     console.error('sync error:', e);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

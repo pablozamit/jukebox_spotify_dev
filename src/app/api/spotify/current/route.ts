@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 import * as admin from 'firebase-admin';
 
-// ❶ Inicializa Admin SDK con Application Default Credentials
+// Inicializar Admin SDK si no está ya inicializado
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
@@ -13,12 +13,12 @@ if (!admin.apps.length) {
   });
 }
 
-const CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID!;
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 
 export async function GET() {
   try {
-    // ❷ Leemos tokens de RTDB en /admin/spotify/tokens
+    // Obtener tokens desde la base de datos
     const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
     const tokens = snap.val() as
       | { accessToken: string; refreshToken: string; expiresAt: number }
@@ -34,12 +34,12 @@ export async function GET() {
     let accessToken = tokens.accessToken;
     const now = Date.now();
 
-    // ❸ Si expiró, refrescamos y actualizamos RTDB
+    // Refrescar el token si ha expirado
     if (now >= tokens.expiresAt) {
       const resp = await axios.post(
         'https://accounts.spotify.com/api/token',
         new URLSearchParams({
-          grant_type:    'refresh_token',
+          grant_type: 'refresh_token',
           refresh_token: tokens.refreshToken,
         }).toString(),
         {
@@ -51,6 +51,7 @@ export async function GET() {
           },
         }
       );
+
       accessToken = resp.data.access_token;
       const newExpiry = Date.now() + resp.data.expires_in * 1000;
 
@@ -60,13 +61,15 @@ export async function GET() {
         .update({ accessToken, expiresAt: newExpiry });
     }
 
-    // ❹ Consultamos al endpoint de Spotify
+    // Obtener pista actualmente sonando
     const playerRes = await axios.get(
       'https://api.spotify.com/v1/me/player/currently-playing',
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true, // Permitir manejar manualmente códigos como 204
+      }
     );
 
-    // 204 = nada sonando
     if (playerRes.status === 204 || !playerRes.data) {
       return NextResponse.json({ isPlaying: false });
     }
@@ -77,12 +80,12 @@ export async function GET() {
       return NextResponse.json({ isPlaying: false });
     }
 
-    // ❺ Mapear a nuestro formato
+    // Formatear y devolver los datos de la canción
     const track = {
-      id:          item.id,
-      name:        item.name,
-      artists:     item.artists.map((a: any) => a.name),
-      albumArtUrl: item.album.images?.[0]?.url ?? null,
+      id: item.id,
+      name: item.name,
+      artists: item.artists.map((a: any) => a.name),
+      albumArtUrl: item.album?.images?.[0]?.url ?? null,
       progress_ms: data.progress_ms,
       duration_ms: item.duration_ms,
     };
@@ -99,4 +102,3 @@ export async function GET() {
     );
   }
 }
-  
