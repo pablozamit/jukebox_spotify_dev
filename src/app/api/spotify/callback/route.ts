@@ -1,4 +1,3 @@
-// ➤ Fuerza este handler a ejecutarse en Node.js, no en Edge
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -6,7 +5,6 @@ import * as admin from 'firebase-admin';
 import axios from 'axios';
 import { cookies } from 'next/headers';
 
-// ❶ Inicializa Admin SDK si no está iniciado
 try {
   if (!admin.apps.length) {
     console.log('[Firebase] Inicializando Admin SDK...');
@@ -30,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     if (!clientId || !clientSecret || !redirectUri) {
       console.error('[Callback] Variables de entorno de Spotify faltantes');
-      return NextResponse.redirect('/admin?error=config_missing');
+      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=config_missing`);
     }
 
     const { searchParams } = new URL(request.url);
@@ -40,26 +38,24 @@ export async function GET(request: NextRequest) {
 
     console.log('[Callback] Parámetros recibidos:', { code, error, state });
 
-    const cookieStore = await cookies(); // ⬅️ FALTA EL await antes
+    const cookieStore = await cookies();
     const storedState = (await cookieStore).get('spotify_auth_state')?.value;
     console.log('[Callback] State en cookie:', storedState);
 
     if (!state || state !== storedState) {
       console.warn('[Callback] State mismatch, posible ataque CSRF');
       (await cookieStore).delete('spotify_auth_state');
-      return NextResponse.redirect('/admin?error=state_mismatch');
+      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=state_mismatch`);
     }
-
     (await cookieStore).delete('spotify_auth_state');
 
     if (error) {
       console.error('[Callback] Error recibido desde Spotify:', error);
-      return NextResponse.redirect(`/admin?error=${encodeURIComponent(error)}`);
+      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=${encodeURIComponent(error)}`);
     }
-
     if (!code) {
       console.error('[Callback] No se recibió código de autorización.');
-      return NextResponse.redirect('/admin?error=no_code');
+      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=no_code`);
     }
 
     console.log('[Callback] Intercambiando código por tokens...');
@@ -84,7 +80,7 @@ export async function GET(request: NextRequest) {
 
     if (!access_token || !refresh_token || typeof expires_in !== 'number') {
       console.error('[Callback] Tokens incompletos:', tokenRes.data);
-      return NextResponse.redirect('/admin?error=incomplete_tokens');
+      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=incomplete_tokens`);
     }
 
     const expiresAt = Date.now() + expires_in * 1000;
@@ -97,11 +93,11 @@ export async function GET(request: NextRequest) {
     });
 
     console.log('[Callback] Tokens guardados. Redirigiendo a /admin');
-    return NextResponse.redirect('/admin?success=spotify_connected');
+    return NextResponse.redirect(`${request.nextUrl.origin}/admin?success=spotify_connected`);
 
   } catch (e: any) {
     const msg = e?.response?.data?.error_description || e?.message || 'Unknown error';
     console.error('[Callback] ERROR FATAL en callback:', msg, e);
-    return NextResponse.redirect(`/admin?error=${encodeURIComponent(msg)}`);
+    return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=${encodeURIComponent(msg)}`);
   }
 }
