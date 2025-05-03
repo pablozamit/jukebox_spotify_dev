@@ -318,11 +318,12 @@ export default function ClientPage() {
     };
     try {
       await set(newRef, newData);
-      toast({
-        title: '¡Canción Añadida!',
-        description: `${song.title} se ha añadido a la cola.`,
-        action: <ToastAction altText="Ok">Ok</ToastAction>,
-      });
+      // --- REMOVED SUCCESS TOAST ---
+      // toast({
+      //   title: '¡Canción Añadida!',
+      //   description: `${song.title} se ha añadido a la cola.`,
+      //   action: <ToastAction altText="Ok">Ok</ToastAction>,
+      // });
       setSearchTerm(''); // Clear search after adding
       setSearchResults([]);
     } catch (e) {
@@ -691,4 +692,3 @@ export default function ClientPage() {
     </div>
   );
 }
-
