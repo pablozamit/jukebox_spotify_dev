@@ -358,6 +358,7 @@ export default function ClientPage() {
         title: 'Canción Eliminada',
         description: 'Tu canción ha sido eliminada de la cola.',
       });
+      setCanAddSong(true); // Allow proposing/voting again after removing
     } catch (e) {
       console.error('Error al eliminar de Firebase:', e);
       toast({
