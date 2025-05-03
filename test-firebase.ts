@@ -1,13 +1,19 @@
 // test-firebase.ts
-
+import 'dotenv/config'; // 👈 Carga automáticamente .env o .env.local
 import * as admin from 'firebase-admin';
 
 async function testFirebaseConnection() {
   try {
+    const dbURL = process.env.FIREBASE_DATABASE_URL;
+
+    if (!dbURL) {
+      throw new Error('FIREBASE_DATABASE_URL no está definida en el entorno');
+    }
+
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.applicationDefault(),
-        databaseURL: process.env.FIREBASE_DATABASE_URL,
+        databaseURL: dbURL,
       });
     }
 
