@@ -2,17 +2,21 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as dotenv from 'dotenv';
 import * as admin from 'firebase-admin';
 import axios from 'axios';
 import { cookies } from 'next/headers';
 
-// ❶ Inicializa Admin SDK con Application Default Credentials
+// ❶ Cargamos las variables de entorno explícitamente
+dotenv.config({ path: '.env.local' });
+
+// ❷ Inicializa Admin SDK con Application Default Credentials
 try {
   if (!admin.apps.length) {
     console.log('Inicializando Firebase Admin SDK...');
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
-      databaseURL: process.env.FIREBASE_DATABASE_URL, // ❗ Usa esta env var
+      databaseURL: process.env.FIREBASE_DATABASE_URL,
     });
     console.log('Firebase Admin SDK inicializado con éxito.');
   }
