@@ -5,10 +5,16 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
 export async function GET() {
-  const clientId    = process.env.SPOTIFY_CLIENT_ID;
-  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+  console.log('--- Inicio del endpoint /api/spotify/connect ---');
+  const clientId       = process.env.SPOTIFY_CLIENT_ID;
+  const redirectUri  = process.env.SPOTIFY_REDIRECT_URI;
+
+  console.log('Client ID:', clientId);
+  console.log('Redirect URI:', redirectUri);
+
   if (!clientId || !redirectUri) {
     console.error('Missing SPOTIFY_CLIENT_ID or SPOTIFY_REDIRECT_URI');
+    console.log('--- Fin del endpoint /api/spotify/connect (error: config missing) ---');
     return NextResponse.json(
       { error: 'Spotify OAuth not configured on the server.' },
       { status: 500 }
@@ -17,6 +23,7 @@ export async function GET() {
 
   // ❶ Generar un state aleatorio para CSRF
   const state = Math.random().toString(36).slice(2);
+  console.log('Generated state:', state);
 
   // ❷ Guardarlo en cookie HTTP-only
   const cookieStore = await cookies();
@@ -28,6 +35,7 @@ export async function GET() {
     path:     '/api/spotify/callback',
     maxAge:   60 * 60,
   });
+  console.log('State cookie set:', state);
 
   // ❸ Construir la URL de autorización de Spotify
   const params = new URLSearchParams({
@@ -38,5 +46,8 @@ export async function GET() {
     state,
   });
 
-  return NextResponse.redirect(`https://accounts.spotify.com/authorize?${params}`);
+  const authorizeUrl = `https://accounts.spotify.com/authorize?$${params}`;
+  console.log('Spotify Authorize URL:', authorizeUrl);
+  console.log('--- Fin del endpoint /api/spotify/connect (redirecting) ---');
+  return NextResponse.redirect(authorizeUrl);
 }
