@@ -14,7 +14,6 @@ interface SpotifyTrackItem {
   preview_url: string | null;
 }
 
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get('q');
@@ -55,61 +54,53 @@ export async function GET(request: Request) {
       if (!playlistId) {
         return NextResponse.json({ error: 'Falta playlistId para el modo playlist' }, { status: 400 });
       }
-      // Fetch playlist tracks - ensure fields include album images
+
       const plRes = await axios.get<{ items: { track: SpotifyTrackItem }[] }>(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
           params: {
-             // Explicitly request album images
             fields: 'items(track(id,name,artists(name),album(name,images),uri,preview_url))',
-            limit: 100, // Adjust limit as needed
+            limit: 100,
           },
         }
       );
 
-       // Check if items exist and track exists before mapping/filtering
-       const playlistTracks = plRes.data.items?.map(item => item.track).filter(Boolean) ?? [];
+      const playlistTracks = plRes.data.items?.map(item => item.track).filter(Boolean) ?? [];
 
-      // Filter tracks based on query (case-insensitive)
       const ql = q.toLowerCase();
       tracks = playlistTracks.filter((t) =>
-          (t.name && t.name.toLowerCase().includes(ql)) ||
-          (t.artists && t.artists.some((a) => a.name && a.name.toLowerCase().includes(ql)))
-        );
+        (t.name && t.name.toLowerCase().includes(ql)) ||
+        (t.artists && t.artists.some((a) => a.name && a.name.toLowerCase().includes(ql)))
+      );
 
     } else {
-      // Search all Spotify tracks - album images are included by default in search results
       const srRes = await axios.get<{ tracks: { items: SpotifyTrackItem[] } }>(
         'https://api.spotify.com/v1/search',
         {
           headers: { Authorization: `Bearer ${accessToken}` },
-          params: { q, type: 'track', limit: 20 }, // Adjust limit as needed
+          params: { q, type: 'track', limit: 20 },
         }
       );
       tracks = srRes.data.tracks?.items ?? [];
     }
 
-    // 3) Format and return results
-    // Keep the full track structure including images
     const results = tracks.map(t => ({
-        id: t.id,
-        name: t.name,
-        artists: t.artists?.map(a => a.name) ?? [], // Handle missing artists
-        album: {
-          name: t.album?.name,
-          images: t.album?.images, // Pass images array
-        },
-        uri: t.uri,
-        preview_url: t.preview_url,
+      id: t.id,
+      name: t.name,
+      artists: t.artists?.map(a => a.name) ?? [],
+      album: {
+        name: t.album?.name,
+        images: t.album?.images,
+      },
+      uri: t.uri,
+      preview_url: t.preview_url,
     }));
-
 
     return NextResponse.json({ results });
 
   } catch (e: any) {
-    console.error("Error interacting with Spotify API:", e.response?.data || e.message || e); // Log detailed error
-     // Provide a more generic error message to the client
+    console.error("Error interacting with Spotify API:", e.response?.data || e.message || e);
     return NextResponse.json({ error: 'Error al conectar con la API de Spotify' }, { status: 500 });
   }
 }
