@@ -1,3 +1,4 @@
+// ➤ Fuerza este handler a ejecutarse en Node.js, no en Edge
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -5,6 +6,7 @@ import * as admin from 'firebase-admin';
 import axios from 'axios';
 import { cookies } from 'next/headers';
 
+// ❶ Inicializa Admin SDK si no está iniciado
 try {
   if (!admin.apps.length) {
     console.log('[Firebase] Inicializando Admin SDK...');
@@ -25,10 +27,11 @@ export async function GET(request: NextRequest) {
     const clientId     = process.env.SPOTIFY_CLIENT_ID;
     const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
     const redirectUri  = process.env.SPOTIFY_REDIRECT_URI;
+    const baseUrl      = process.env.BASE_URL;
 
-    if (!clientId || !clientSecret || !redirectUri) {
-      console.error('[Callback] Variables de entorno de Spotify faltantes');
-      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=config_missing`);
+    if (!clientId || !clientSecret || !redirectUri || !baseUrl) {
+      console.error('[Callback] Variables de entorno faltantes');
+      return NextResponse.redirect(`${baseUrl}/admin?error=config_missing`);
     }
 
     const { searchParams } = new URL(request.url);
@@ -45,17 +48,18 @@ export async function GET(request: NextRequest) {
     if (!state || state !== storedState) {
       console.warn('[Callback] State mismatch, posible ataque CSRF');
       (await cookieStore).delete('spotify_auth_state');
-      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=state_mismatch`);
+      return NextResponse.redirect(`${baseUrl}/admin?error=state_mismatch`);
     }
     (await cookieStore).delete('spotify_auth_state');
 
     if (error) {
       console.error('[Callback] Error recibido desde Spotify:', error);
-      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=${encodeURIComponent(error)}`);
+      return NextResponse.redirect(`${baseUrl}/admin?error=${encodeURIComponent(error)}`);
     }
+
     if (!code) {
       console.error('[Callback] No se recibió código de autorización.');
-      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=no_code`);
+      return NextResponse.redirect(`${baseUrl}/admin?error=no_code`);
     }
 
     console.log('[Callback] Intercambiando código por tokens...');
@@ -69,7 +73,8 @@ export async function GET(request: NextRequest) {
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+          Authorization:
+            'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
         },
       }
     );
@@ -80,24 +85,27 @@ export async function GET(request: NextRequest) {
 
     if (!access_token || !refresh_token || typeof expires_in !== 'number') {
       console.error('[Callback] Tokens incompletos:', tokenRes.data);
-      return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=incomplete_tokens`);
+      return NextResponse.redirect(`${baseUrl}/admin?error=incomplete_tokens`);
     }
 
     const expiresAt = Date.now() + expires_in * 1000;
 
     console.log('[Callback] Guardando tokens en Firebase...');
-    await admin.database().ref('/admin/spotify/tokens').set({
-      accessToken:  access_token,
-      refreshToken: refresh_token,
-      expiresAt,
-    });
+    await admin
+      .database()
+      .ref('/admin/spotify/tokens')
+      .set({
+        accessToken:  access_token,
+        refreshToken: refresh_token,
+        expiresAt,
+      });
 
     console.log('[Callback] Tokens guardados. Redirigiendo a /admin');
-    return NextResponse.redirect(`${request.nextUrl.origin}/admin?success=spotify_connected`);
+    return NextResponse.redirect(`${baseUrl}/admin?success=spotify_connected`);
 
   } catch (e: any) {
     const msg = e?.response?.data?.error_description || e?.message || 'Unknown error';
     console.error('[Callback] ERROR FATAL en callback:', msg, e);
-    return NextResponse.redirect(`${request.nextUrl.origin}/admin?error=${encodeURIComponent(msg)}`);
+    return NextResponse.redirect(`${process.env.BASE_URL}/admin?error=${encodeURIComponent(msg)}`);
   }
 }
