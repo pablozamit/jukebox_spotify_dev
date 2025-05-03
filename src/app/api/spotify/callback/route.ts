@@ -2,19 +2,22 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import * as admin from 'firebase-admin';
 import axios from 'axios';
-
-// Firebase Admin SDK – imports separados para compatibilidad con ESM
-import { getApps, initializeApp, applicationDefault } from 'firebase-admin/app';
-import { getDatabase } from 'firebase-admin/database';
+import { cookies } from 'next/headers';
 
 // ❶ Inicializa Admin SDK con Application Default Credentials
-if (!getApps().length) {
-  initializeApp({
-    credential: applicationDefault(),
-    databaseURL: process.env.FIREBASE_DATABASE_URL, // ❗ NO uses NEXT_PUBLIC_ aquí
-  });
+try {
+  if (!admin.apps.length) {
+    console.log('Inicializando Firebase Admin SDK...');
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      databaseURL: process.env.FIREBASE_DATABASE_URL, // ❗ Usa esta env var
+    });
+    console.log('Firebase Admin SDK inicializado con éxito.');
+  }
+} catch (err) {
+  console.error('Error al inicializar Firebase Admin SDK:', err);
 }
 
 export async function GET(request: NextRequest) {
@@ -28,7 +31,6 @@ export async function GET(request: NextRequest) {
 
   if (!clientId || !clientSecret || !redirectUri) {
     console.error('Spotify API credentials missing in environment variables.');
-    console.log('--- Fin del callback (error: config missing) ---');
     return NextResponse.redirect('/admin?error=config_missing');
   }
 
@@ -42,7 +44,6 @@ export async function GET(request: NextRequest) {
     console.log('Error recibido de Spotify:', error);
     console.log('State recibido de Spotify:', state);
 
-    // ❷ CSRF: validamos “state” con la cookie
     const cookieStore = await cookies();
     const storedState = cookieStore.get('spotify_auth_state')?.value;
     console.log('State almacenado en la cookie:', storedState);
@@ -50,7 +51,6 @@ export async function GET(request: NextRequest) {
     if (!state || state !== storedState) {
       if (storedState) cookieStore.delete('spotify_auth_state');
       console.error('State mismatch error. Potential CSRF attack.');
-      console.log('--- Fin del callback (error: state mismatch) ---');
       return NextResponse.redirect('/admin?error=state_mismatch');
     }
     cookieStore.delete('spotify_auth_state');
@@ -58,17 +58,14 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('Spotify OAuth error parameter:', error);
-      console.log('--- Fin del callback (error desde Spotify) ---');
       return NextResponse.redirect(`/admin?error=${encodeURIComponent(error)}`);
     }
     if (!code) {
       console.error('Missing authorization code from Spotify.');
-      console.log('--- Fin del callback (error: no code) ---');
       return NextResponse.redirect('/admin?error=no_code');
     }
 
-    // ❸ Intercambiamos el código por tokens
-    console.log('Intentando intercambiar el código por tokens...');
+    console.log('Intercambiando el código por tokens...');
     const tokenRes = await axios.post(
       'https://accounts.spotify.com/api/token',
       new URLSearchParams({
@@ -85,54 +82,33 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    console.log('Respuesta de la API de Spotify (tokens):', JSON.stringify(tokenRes.data, null, 2));
-
-    if (tokenRes.status !== 200 || !tokenRes.data) {
-      console.error('Invalid response from Spotify token endpoint:', tokenRes.status, tokenRes.data);
-      console.log('--- Fin del callback (error: invalid token response) ---');
-      throw new Error('Failed to get tokens from Spotify');
-    }
+    console.log('Respuesta de Spotify:', JSON.stringify(tokenRes.data, null, 2));
 
     const { access_token, refresh_token, expires_in } = tokenRes.data;
-    console.log('Access Token recibido:', access_token);
-    console.log('Refresh Token recibido:', refresh_token);
-    console.log('Expires In:', expires_in);
 
     if (!access_token || !refresh_token || typeof expires_in !== 'number') {
-      console.error('Incomplete token data received:', tokenRes.data);
-      console.log('--- Fin del callback (error: incomplete token data) ---');
+      console.error('Datos de token incompletos:', tokenRes.data);
       throw new Error('Incomplete token data from Spotify');
     }
 
     const expiresAt = Date.now() + expires_in * 1000;
-    console.log('Expires At:', new Date(expiresAt).toISOString());
 
-    // ❹ Guardamos los tokens en RTDB bajo /admin/spotify/tokens
-    console.log('Intentando guardar tokens en RTDB...');
-    try {
-      await getDatabase()
-        .ref('/admin/spotify/tokens')
-        .set({
-          accessToken:  access_token,
-          refreshToken: refresh_token,
-          expiresAt,
-        });
-      console.log('Spotify tokens successfully stored in RTDB.');
-      console.log('--- Fin del callback (éxito) ---');
-      return NextResponse.redirect('/admin?success=spotify_connected');
-    } catch (dbErr: any) {
-      console.error('Error saving Spotify tokens in RTDB:', dbErr);
-      console.log('--- Fin del callback (error: token save failed) ---');
-      return NextResponse.redirect('/admin?error=token_save_failed');
-    }
+    console.log('Guardando tokens en RTDB...');
+    await admin
+      .database()
+      .ref('/admin/spotify/tokens')
+      .set({
+        accessToken:  access_token,
+        refreshToken: refresh_token,
+        expiresAt,
+      });
+
+    console.log('Tokens guardados correctamente.');
+    return NextResponse.redirect('/admin?success=spotify_connected');
 
   } catch (e: any) {
-    const msg = e.response?.data?.error_description
-                || e.response?.data?.error
-                || e.message
-                || 'Unknown callback error';
-    console.error('Error in Spotify OAuth callback:', msg, e);
-    console.log('--- Fin del callback (error general) ---');
+    const msg = e?.response?.data?.error_description || e?.message || 'Unknown error';
+    console.error('Error en el callback de Spotify:', msg);
     return NextResponse.redirect(`/admin?error=${encodeURIComponent(msg)}`);
   }
 }
