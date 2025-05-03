@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 import * as admin from 'firebase-admin';
 
-// ❶ Inicializa Admin SDK con Application Default Credentials
+// Inicializa Admin SDK si no está activo
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
@@ -13,18 +13,19 @@ if (!admin.apps.length) {
   });
 }
 
-const CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID!;
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 
 export async function POST(request: Request) {
   try {
-    // ❷ Leemos trackId del body
+    // Leer body con el trackId
     const { trackId } = await request.json();
+
     if (!trackId) {
       return NextResponse.json({ error: 'trackId is required' }, { status: 400 });
     }
 
-    // ❸ Leemos tokens de RTDB en /admin/spotify/tokens
+    // Leer tokens desde Firebase
     const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
     const tokens = snap.val() as
       | { accessToken: string; refreshToken: string; expiresAt: number }
@@ -40,12 +41,12 @@ export async function POST(request: Request) {
     let accessToken = tokens.accessToken;
     const now = Date.now();
 
-    // ❹ Si expiró, lo refrescamos y actualizamos RTDB
+    // Refrescar token si ha expirado
     if (now >= tokens.expiresAt) {
       const resp = await axios.post(
         'https://accounts.spotify.com/api/token',
         new URLSearchParams({
-          grant_type:    'refresh_token',
+          grant_type: 'refresh_token',
           refresh_token: tokens.refreshToken,
         }).toString(),
         {
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
         .update({ accessToken, expiresAt: newExpiry });
     }
 
-    // ❺ Encolamos la pista en Spotify
+    // Encolar la canción en Spotify
     const queueRes = await fetch(
       `https://api.spotify.com/v1/me/player/queue?uri=spotify:track:${trackId}`,
       {
@@ -84,7 +85,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // ❻ Éxito
     return NextResponse.json({ success: true });
   } catch (e: any) {
     console.error('add-to-queue error:', e);
