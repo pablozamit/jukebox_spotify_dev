@@ -38,26 +38,25 @@ export async function GET(request: NextRequest) {
     const error  = searchParams.get('error');
     const state  = searchParams.get('state');
 
-    console.log('[Callback] Parámetros recibidos:');
-    console.log('code:', code);
-    console.log('error:', error);
-    console.log('state:', state);
+    console.log('[Callback] Parámetros recibidos:', { code, error, state });
 
-    const cookieStore = await cookies(); // ← AQUÍ EL await
-    const storedState = (await cookieStore.get('spotify_auth_state'))?.value;
+    const cookieStore = await cookies(); // ⬅️ FALTA EL await antes
+    const storedState = (await cookieStore).get('spotify_auth_state')?.value;
     console.log('[Callback] State en cookie:', storedState);
 
     if (!state || state !== storedState) {
       console.warn('[Callback] State mismatch, posible ataque CSRF');
-      await cookieStore.delete('spotify_auth_state');
+      (await cookieStore).delete('spotify_auth_state');
       return NextResponse.redirect('/admin?error=state_mismatch');
     }
-    await cookieStore.delete('spotify_auth_state');
+
+    (await cookieStore).delete('spotify_auth_state');
 
     if (error) {
       console.error('[Callback] Error recibido desde Spotify:', error);
       return NextResponse.redirect(`/admin?error=${encodeURIComponent(error)}`);
     }
+
     if (!code) {
       console.error('[Callback] No se recibió código de autorización.');
       return NextResponse.redirect('/admin?error=no_code');
@@ -74,8 +73,7 @@ export async function GET(request: NextRequest) {
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization:
-            'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+          Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
         },
       }
     );
@@ -92,14 +90,11 @@ export async function GET(request: NextRequest) {
     const expiresAt = Date.now() + expires_in * 1000;
 
     console.log('[Callback] Guardando tokens en Firebase...');
-    await admin
-      .database()
-      .ref('/admin/spotify/tokens')
-      .set({
-        accessToken:  access_token,
-        refreshToken: refresh_token,
-        expiresAt,
-      });
+    await admin.database().ref('/admin/spotify/tokens').set({
+      accessToken:  access_token,
+      refreshToken: refresh_token,
+      expiresAt,
+    });
 
     console.log('[Callback] Tokens guardados. Redirigiendo a /admin');
     return NextResponse.redirect('/admin?success=spotify_connected');
