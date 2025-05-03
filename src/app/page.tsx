@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -9,7 +8,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardFooter,
   CardDescription,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -158,7 +156,7 @@ export default function ClientPage() {
       }
     );
     return () => unsub();
-  }, [toast, isDbValid]); // Added isDbValid dependency
+  }, [isDbValid, isMounted]);
 
   // Fetch Playlist Details when config is loaded and in playlist mode
   useEffect(() => {
@@ -240,7 +238,7 @@ export default function ClientPage() {
       }
     );
     return () => unsub();
-  }, [userSessionId, toast, isDbValid]); // Dependencies: userSessionId, toast, isDbValid
+  }, [userSessionId, isMounted, isDbValid]); // Dependencies: userSessionId, toast, isDbValid
 
   // 5. Búsqueda con debounce
   const doSearch = useCallback(async () => {
@@ -379,6 +377,11 @@ export default function ClientPage() {
           <Music className="h-8 w-8 md:h-10 md:w-10" /> Bar Jukebox
         </h1>
         <p className="text-lg text-muted-foreground">¡Elige la banda sonora de la noche!</p>
+        {spotifyConfig?.searchMode === 'playlist' && playlistDetails && (
+           <p className="text-sm text-muted-foreground">
+               Playlist actual: {playlistDetails.name}
+           </p>
+        )}
       </header>
 
 
@@ -425,9 +428,6 @@ export default function ClientPage() {
                    className="w-full mt-2 h-1.5 rounded-full overflow-hidden bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary"
                    aria-label="Progreso de la canción"
                  />
-                 {/* <p className="text-xs text-muted-foreground mt-1 text-right">
-                  {Math.floor((currentPlaying.track.progress_ms ?? 0) / 1000)}s / {Math.floor((currentPlaying.track.duration_ms ?? 0) / 1000)}s
-                 </p> */}
                </div>
              </div>
            ) : (
@@ -687,3 +687,4 @@ export default function ClientPage() {
     </div>
   );
 }
+
