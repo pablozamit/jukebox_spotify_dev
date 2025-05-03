@@ -46,14 +46,11 @@ export default function AdminPage() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [queue, setQueue] = useState<QueueSong[]>([]);
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
-  const [config, setConfig] = useState<{
-    searchMode: 'all' | 'playlist';
-    playlistId?: string;
-  }>({ searchMode: 'all' });
+  const [config, setConfig] = useState<{ searchMode: 'all' | 'playlist'; playlistId?: string }>({ searchMode: 'all' });
   const [playlistIdInput, setPlaylistIdInput] = useState('');
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+  const [isSpotifyConnected, setIsSpotifyConnected] = useState(false);
 
-  // ─── Protección de la ruta ───────────────────────────────────────────────────
   useEffect(() => {
     if (!auth) {
       setLoadingAuth(false);
@@ -71,7 +68,6 @@ export default function AdminPage() {
     return () => unsub();
   }, [router]);
 
-  // ─── Leer cola desde Firebase ───────────────────────────────────────────────
   useEffect(() => {
     if (!db || !user) {
       setIsLoadingQueue(false);
@@ -82,10 +78,7 @@ export default function AdminPage() {
     const unsub = onValue(queueRef, (snapshot) => {
       const data = snapshot.val() || {};
       const items = Object.entries(data)
-        .sort(
-          ([, a], [, b]) =>
-            ((a as any).order ?? 0) - ((b as any).order ?? 0)
-        )
+        .sort(([, a], [, b]) => ((a as any).order ?? 0) - ((b as any).order ?? 0))
         .map(([key, val]) => ({ id: key, ...(val as any) }));
       setQueue(items as QueueSong[]);
       setIsLoadingQueue(false);
@@ -93,7 +86,6 @@ export default function AdminPage() {
     return () => unsub();
   }, [user]);
 
-  // ─── Leer configuración desde Firebase ─────────────────────────────────────
   useEffect(() => {
     if (!db || !user) {
       setIsLoadingConfig(false);
@@ -110,13 +102,24 @@ export default function AdminPage() {
     return () => unsub();
   }, [user]);
 
-  // ─── Eliminar canción de la cola ───────────────────────────────────────────
+  useEffect(() => {
+    const checkSpotify = async () => {
+      try {
+        const res = await fetch('/api/spotify/current');
+        const data = await res.json();
+        setIsSpotifyConnected(!data.error);
+      } catch {
+        setIsSpotifyConnected(false);
+      }
+    };
+    checkSpotify();
+  }, []);
+
   const handleRemoveSong = async (songId: string) => {
     if (!db) return;
     await remove(ref(db, `/queue/${songId}`));
   };
 
-  // ─── Reordenar canciones ───────────────────────────────────────────────────
   const handleMove = async (index: number, direction: -1 | 1) => {
     if (!db) return;
     const newQueue = [...queue];
@@ -130,14 +133,9 @@ export default function AdminPage() {
     await update(ref(db), updates);
   };
 
-  // ─── Enviar próxima canción a Spotify ─────────────────────────────────────
   const handleAddNextToSpotify = async () => {
     if (!db) {
-      toast({
-        title: 'Error',
-        description: 'Database unavailable.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Database unavailable.', variant: 'destructive' });
       return;
     }
     if (queue.length === 0) {
@@ -159,22 +157,25 @@ export default function AdminPage() {
       });
       await handleRemoveSong(next.id);
     } catch (err: any) {
-      toast({
-        title: 'Error Spotify',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast({ title: 'Error Spotify', description: err.message, variant: 'destructive' });
     }
   };
 
-  // Si aún validamos la sesión, mostramos indicador
+  const handleSpotifyAction = async () => {
+    if (isSpotifyConnected) {
+      await fetch('/api/spotify/disconnect', { method: 'POST' });
+      setIsSpotifyConnected(false);
+    } else {
+      window.location.href = '/api/spotify/connect';
+    }
+  };
+
   if (loadingAuth) {
     return <div>🔄 Comprobando sesión…</div>;
   }
 
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6">
-      {/* ─── Gestión de Cola ─────────────────────────────────────────── */}
       <div className="flex-1">
         <Card className="mb-6 md:mb-0">
           <CardHeader className="flex justify-between items-center">
@@ -191,30 +192,24 @@ export default function AdminPage() {
           <CardContent className="p-0">
             <ScrollArea className="h-80 p-4">
               {isLoadingQueue ? (
-                <>
-                  {[...Array(5)].map((_, i) => (
-                    <div key={i} className="flex items-center space-x-3 p-3">
-                      <Skeleton className="h-10 w-10 rounded object-cover flex-shrink-0" />
-                      <div className="space-y-1 flex-1">
-                        <Skeleton className="h-4 w-3/4 rounded" />
-                        <Skeleton className="h-3 w-1/2 rounded" />
-                      </div>
-                      <Skeleton className="h-8 w-8 rounded-md" />
-                      <Skeleton className="h-8 w-8 rounded-md" />
-                      <Skeleton className="h-8 w-8 rounded-md" />
+                [...Array(5)].map((_, i) => (
+                  <div key={i} className="flex items-center space-x-3 p-3">
+                    <Skeleton className="h-10 w-10 rounded object-cover flex-shrink-0" />
+                    <div className="space-y-1 flex-1">
+                      <Skeleton className="h-4 w-3/4 rounded" />
+                      <Skeleton className="h-3 w-1/2 rounded" />
                     </div>
-                  ))}
-                </>
+                    <Skeleton className="h-8 w-8 rounded-md" />
+                    <Skeleton className="h-8 w-8 rounded-md" />
+                    <Skeleton className="h-8 w-8 rounded-md" />
+                  </div>
+                ))
               ) : queue.length > 0 ? (
                 queue.map((song, idx) => (
                   <div key={song.id} className="flex items-center p-3 gap-3 hover:bg-secondary/50 rounded-md">
                     <span className="w-6 text-center">{idx + 1}</span>
                     {song.albumArtUrl ? (
-                      <img
-                        src={song.albumArtUrl}
-                        alt={`${song.title} cover`}
-                        className="h-10 w-10 rounded object-cover"
-                      />
+                      <img src={song.albumArtUrl} alt={song.title} className="h-10 w-10 rounded object-cover" />
                     ) : (
                       <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
                         <Music className="h-5 w-5 text-muted-foreground" />
@@ -225,15 +220,9 @@ export default function AdminPage() {
                       <p className="truncate text-sm text-muted-foreground">{song.artist}</p>
                     </div>
                     <div className="flex gap-1">
-                      <Button size="icon" onClick={() => handleMove(idx, -1)} disabled={idx === 0}>
-                        <ArrowUp />
-                      </Button>
-                      <Button size="icon" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}>
-                        <ArrowDown />
-                      </Button>
-                      <Button size="icon" onClick={() => handleRemoveSong(song.id)}>
-                        <Trash2 />
-                      </Button>
+                      <Button size="icon" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
+                      <Button size="icon" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}><ArrowDown /></Button>
+                      <Button size="icon" onClick={() => handleRemoveSong(song.id)}><Trash2 /></Button>
                     </div>
                   </div>
                 ))
@@ -245,14 +234,12 @@ export default function AdminPage() {
         </Card>
       </div>
 
-      {/* ─── Ajustes y Salir ────────────────────────────────────────────── */}
       <div className="w-full md:w-80">
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Settings /> Settings
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Switch de modo de búsqueda */}
             <div className="flex items-center gap-2">
               <Switch
                 id="search-mode"
@@ -266,7 +253,6 @@ export default function AdminPage() {
               <Label htmlFor="search-mode">Buscar solo en playlist</Label>
             </div>
 
-            {/* Input de Playlist ID */}
             {config.searchMode === 'playlist' && (
               <div className="flex gap-2 items-end">
                 <Input
@@ -288,25 +274,19 @@ export default function AdminPage() {
               </div>
             )}
 
-            {/* Conectar Spotify */}
             <div className="mt-4 flex justify-center">
               <Button
-                onClick={() => { window.location.href = '/api/spotify/connect'; }}
+                onClick={handleSpotifyAction}
                 size="sm"
-                variant="outline"
+                variant={isSpotifyConnected ? 'destructive' : 'outline'}
                 disabled={!isDbValid}
               >
-                Connect Spotify
+                {isSpotifyConnected ? 'Disconnect Spotify' : 'Connect Spotify'}
               </Button>
             </div>
           </CardContent>
           <CardFooter className="flex justify-between">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (auth) signOut(auth);
-              }}
-            >
+            <Button variant="outline" onClick={() => auth && signOut(auth)}>
               Logout
             </Button>
           </CardFooter>
