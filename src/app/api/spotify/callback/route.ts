@@ -6,11 +6,14 @@ import * as admin from 'firebase-admin';
 import axios from 'axios';
 import { cookies } from 'next/headers';
 
+// 🔐 Fuerza uso del archivo ADC si no se detecta automáticamente
+process.env.GOOGLE_APPLICATION_CREDENTIALS ||= '/home/user/.config/gcloud/application_default_credentials.json';
+
 // ❶ Inicializa Admin SDK con Application Default Credentials
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.FIREBASE_DATABASE_URL, // ← 🔴 Aquí está la corrección
+    databaseURL: process.env.FIREBASE_DATABASE_URL, // ← 🔴 Asegúrate de no usar NEXT_PUBLIC_ aquí
   });
 }
 
