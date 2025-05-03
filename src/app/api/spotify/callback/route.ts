@@ -2,18 +2,18 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as admin from 'firebase-admin';
-import axios from 'axios';
 import { cookies } from 'next/headers';
+import axios from 'axios';
 
-// 🔐 Fuerza uso del archivo ADC si no se detecta automáticamente
-process.env.GOOGLE_APPLICATION_CREDENTIALS ||= '/home/user/.config/gcloud/application_default_credentials.json';
+// Firebase Admin SDK – imports separados para compatibilidad con ESM
+import { getApps, initializeApp, applicationDefault } from 'firebase-admin/app';
+import { getDatabase } from 'firebase-admin/database';
 
 // ❶ Inicializa Admin SDK con Application Default Credentials
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.FIREBASE_DATABASE_URL, // ← 🔴 Asegúrate de no usar NEXT_PUBLIC_ aquí
+if (!getApps().length) {
+  initializeApp({
+    credential: applicationDefault(),
+    databaseURL: process.env.FIREBASE_DATABASE_URL, // ❗ NO uses NEXT_PUBLIC_ aquí
   });
 }
 
@@ -80,8 +80,7 @@ export async function GET(request: NextRequest) {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Authorization:
-            'Basic ' +
-            Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+            'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
         },
       }
     );
@@ -111,8 +110,7 @@ export async function GET(request: NextRequest) {
     // ❹ Guardamos los tokens en RTDB bajo /admin/spotify/tokens
     console.log('Intentando guardar tokens en RTDB...');
     try {
-      await admin
-        .database()
+      await getDatabase()
         .ref('/admin/spotify/tokens')
         .set({
           accessToken:  access_token,
