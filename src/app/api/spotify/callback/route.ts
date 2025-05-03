@@ -10,12 +10,12 @@ import { cookies } from 'next/headers';
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+    databaseURL: process.env.FIREBASE_DATABASE_URL, // ← 🔴 Aquí está la corrección
   });
 }
 
 export async function GET(request: NextRequest) {
-  const clientId       = process.env.SPOTIFY_CLIENT_ID;
+  const clientId     = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
   const redirectUri  = process.env.SPOTIFY_REDIRECT_URI;
 
@@ -40,8 +40,8 @@ export async function GET(request: NextRequest) {
     console.log('State recibido de Spotify:', state);
 
     // ❷ CSRF: validamos “state” con la cookie
-    const cookieStore   = await cookies();
-    const storedState   = cookieStore.get('spotify_auth_state')?.value;
+    const cookieStore = await cookies();
+    const storedState = cookieStore.get('spotify_auth_state')?.value;
     console.log('State almacenado en la cookie:', storedState);
 
     if (!state || state !== storedState) {
@@ -50,7 +50,6 @@ export async function GET(request: NextRequest) {
       console.log('--- Fin del callback (error: state mismatch) ---');
       return NextResponse.redirect('/admin?error=state_mismatch');
     }
-    // Si coincide, borramos la cookie
     cookieStore.delete('spotify_auth_state');
     console.log('Validación de state exitosa.');
 
@@ -113,7 +112,7 @@ export async function GET(request: NextRequest) {
         .database()
         .ref('/admin/spotify/tokens')
         .set({
-          accessToken:   access_token,
+          accessToken:  access_token,
           refreshToken: refresh_token,
           expiresAt,
         });
