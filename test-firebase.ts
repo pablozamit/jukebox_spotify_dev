@@ -1,5 +1,6 @@
-// test-firebase.ts
-import 'dotenv/config'; // 👈 Carga automáticamente .env o .env.local
+import * as dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+
 import * as admin from 'firebase-admin';
 
 async function testFirebaseConnection() {
