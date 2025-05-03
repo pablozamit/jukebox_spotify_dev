@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -39,6 +38,7 @@ interface QueueSong {
   id: string;
   order?: number;
   addedByUserId?: string;
+  votes?: number;
 }
 
 export default function AdminPage() {
@@ -136,34 +136,6 @@ export default function AdminPage() {
     await update(ref(db), updates);
   };
 
-  const handleAddNextToSpotify = async () => {
-    if (!db) {
-      toast({ title: 'Error', description: 'Database unavailable.', variant: 'destructive' });
-      return;
-    }
-    if (queue.length === 0) {
-      toast({ title: 'Queue empty', description: 'No songs to add.' });
-      return;
-    }
-    const next = queue[0];
-    try {
-      const res = await fetch('/api/spotify/add-to-queue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId: next.spotifyTrackId })
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Unknown error');
-      toast({
-        title: 'Enviado a Spotify',
-        description: `${next.title} añadido a tu cola de Spotify.`
-      });
-      await handleRemoveSong(next.id);
-    } catch (err: any) {
-      toast({ title: 'Error Spotify', description: err.message, variant: 'destructive' });
-    }
-  };
-
   const handleSpotifyAction = async () => {
     if (isSpotifyConnected) {
       await fetch('/api/spotify/disconnect', { method: 'POST' });
@@ -172,6 +144,28 @@ export default function AdminPage() {
       window.location.href = '/api/spotify/connect';
     }
   };
+
+  // 🔁 Sincronización automática con Spotify
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/spotify/sync');
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Error al sincronizar');
+        if (json.action === 'started') {
+          toast({
+            title: '🎵 Reproducción iniciada',
+            description: `Ahora suena: ${json.track?.title}`,
+          });
+        }
+      } catch (e: any) {
+        console.error('Error en sincronización automática:', e.message);
+      }
+    }, 5000); // cada 5 segundos
+
+    return () => clearInterval(interval);
+  }, [toast]);
+
 
   if (loadingAuth) {
     return <div>🔄 Comprobando sesión…</div>;
@@ -185,13 +179,6 @@ export default function AdminPage() {
             <CardTitle className="flex items-center gap-2">
               <ListMusic /> Gestionar Cola
             </CardTitle>
-            <Button
-              onClick={handleAddNextToSpotify}
-              disabled={queue.length === 0 || isLoadingConfig || !isDbValid || !isSpotifyConnected}
-              title={!isSpotifyConnected ? "Conecta Spotify primero" : "Añadir siguiente a Spotify"}
-            >
-              <Music className="mr-1" /> Añadir Siguiente a Spotify
-            </Button>
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-80 p-4">
@@ -222,6 +209,7 @@ export default function AdminPage() {
                     <div className="flex-1 overflow-hidden">
                       <p className="truncate font-medium">{song.title}</p>
                       <p className="truncate text-sm text-muted-foreground">{song.artist}</p>
+                      <p className="text-sm text-muted-foreground">Votos: {song.votes ?? 0}</p>
                     </div>
                     <div className="flex gap-1">
                       <Button size="icon" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
@@ -290,9 +278,9 @@ export default function AdminPage() {
             </div>
           </CardContent>
           <CardFooter className="flex justify-between gap-2">
-             {/* New 'Go to Jukebox' button */}
+              {/* New 'Go to Jukebox' button */}
             <Button variant="outline" onClick={() => router.push('/')}>
-               <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
+                <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
             </Button>
             <Button variant="outline" onClick={() => auth && signOut(auth)}>
               <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
