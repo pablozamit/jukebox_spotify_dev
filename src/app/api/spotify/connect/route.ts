@@ -46,7 +46,7 @@ export async function GET() {
     state,
   });
 
-  const authorizeUrl = `https://accounts.spotify.com/authorize?$${params}`;
+  const authorizeUrl = `https://accounts.spotify.com/authorize?${params}`;
   console.log('Spotify Authorize URL:', authorizeUrl);
   console.log('--- Fin del endpoint /api/spotify/connect (redirecting) ---');
   return NextResponse.redirect(authorizeUrl);
