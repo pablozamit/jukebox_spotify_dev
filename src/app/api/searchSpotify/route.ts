@@ -113,4 +113,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Error al conectar con la API de Spotify' }, { status: 500 });
   }
 }
-```
