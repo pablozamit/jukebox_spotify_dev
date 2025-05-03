@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -157,7 +158,7 @@ export default function ClientPage() {
       }
     );
     return () => unsub();
-  }, [toast]); // Removed isDbValid dependency as it's checked at the start
+  }, [toast, isDbValid]); // Added isDbValid dependency
 
   // Fetch Playlist Details when config is loaded and in playlist mode
   useEffect(() => {
@@ -318,12 +319,6 @@ export default function ClientPage() {
     };
     try {
       await set(newRef, newData);
-      // --- REMOVED SUCCESS TOAST ---
-      // toast({
-      //   title: '¡Canción Añadida!',
-      //   description: `${song.title} se ha añadido a la cola.`,
-      //   action: <ToastAction altText="Ok">Ok</ToastAction>,
-      // });
       setSearchTerm(''); // Clear search after adding
       setSearchResults([]);
     } catch (e) {
@@ -430,9 +425,9 @@ export default function ClientPage() {
                    className="w-full mt-2 h-1.5 rounded-full overflow-hidden bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary"
                    aria-label="Progreso de la canción"
                  />
-                 <p className="text-xs text-muted-foreground mt-1 text-right">
+                 {/* <p className="text-xs text-muted-foreground mt-1 text-right">
                   {Math.floor((currentPlaying.track.progress_ms ?? 0) / 1000)}s / {Math.floor((currentPlaying.track.duration_ms ?? 0) / 1000)}s
-                 </p>
+                 </p> */}
                </div>
              </div>
            ) : (
