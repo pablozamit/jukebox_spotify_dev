@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -25,7 +26,9 @@ import {
   ArrowDown,
   Settings,
   ListMusic,
-  Music
+  Music,
+  LogOut,
+  Home, // Import Home icon
 } from 'lucide-react';
 
 interface QueueSong {
@@ -180,13 +183,14 @@ export default function AdminPage() {
         <Card className="mb-6 md:mb-0">
           <CardHeader className="flex justify-between items-center">
             <CardTitle className="flex items-center gap-2">
-              <ListMusic /> Manage Queue
+              <ListMusic /> Gestionar Cola
             </CardTitle>
             <Button
               onClick={handleAddNextToSpotify}
-              disabled={queue.length === 0 || isLoadingConfig || !isDbValid}
+              disabled={queue.length === 0 || isLoadingConfig || !isDbValid || !isSpotifyConnected}
+              title={!isSpotifyConnected ? "Conecta Spotify primero" : "Añadir siguiente a Spotify"}
             >
-              <Music className="mr-1" /> Add Next to Spotify
+              <Music className="mr-1" /> Añadir Siguiente a Spotify
             </Button>
           </CardHeader>
           <CardContent className="p-0">
@@ -227,7 +231,7 @@ export default function AdminPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-center py-10">The queue is empty. Add a song!</p>
+                <p className="text-center py-10">La cola está vacía. ¡Añade canciones!</p>
               )}
             </ScrollArea>
           </CardContent>
@@ -237,7 +241,7 @@ export default function AdminPage() {
       <div className="w-full md:w-80">
         <Card>
           <CardHeader className="flex items-center gap-2">
-            <Settings /> Settings
+            <Settings /> Configuración
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
@@ -259,7 +263,7 @@ export default function AdminPage() {
                   value={playlistIdInput}
                   onChange={(e) => setPlaylistIdInput(e.target.value)}
                   disabled={isLoadingConfig || !isDbValid}
-                  placeholder="Playlist ID"
+                  placeholder="ID de Playlist"
                 />
                 <Button
                   onClick={() => {
@@ -269,7 +273,7 @@ export default function AdminPage() {
                   }}
                   disabled={!playlistIdInput.trim() || isLoadingConfig || !isDbValid}
                 >
-                  Save
+                  Guardar
                 </Button>
               </div>
             )}
@@ -281,13 +285,17 @@ export default function AdminPage() {
                 variant={isSpotifyConnected ? 'destructive' : 'outline'}
                 disabled={!isDbValid}
               >
-                {isSpotifyConnected ? 'Disconnect Spotify' : 'Connect Spotify'}
+                {isSpotifyConnected ? 'Desconectar Spotify' : 'Conectar Spotify'}
               </Button>
             </div>
           </CardContent>
-          <CardFooter className="flex justify-between">
+          <CardFooter className="flex justify-between gap-2">
+             {/* New 'Go to Jukebox' button */}
+            <Button variant="outline" onClick={() => router.push('/')}>
+               <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
+            </Button>
             <Button variant="outline" onClick={() => auth && signOut(auth)}>
-              Logout
+              <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
             </Button>
           </CardFooter>
         </Card>
