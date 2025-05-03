@@ -43,16 +43,16 @@ export async function GET(request: NextRequest) {
     console.log('error:', error);
     console.log('state:', state);
 
-    const cookieStore = await cookies();
-    const storedState = cookieStore.get('spotify_auth_state')?.value;
+    const cookieStore = await cookies(); // ← AQUÍ EL await
+    const storedState = (await cookieStore.get('spotify_auth_state'))?.value;
     console.log('[Callback] State en cookie:', storedState);
 
     if (!state || state !== storedState) {
       console.warn('[Callback] State mismatch, posible ataque CSRF');
-      cookieStore.delete('spotify_auth_state');
+      await cookieStore.delete('spotify_auth_state');
       return NextResponse.redirect('/admin?error=state_mismatch');
     }
-    cookieStore.delete('spotify_auth_state');
+    await cookieStore.delete('spotify_auth_state');
 
     if (error) {
       console.error('[Callback] Error recibido desde Spotify:', error);
