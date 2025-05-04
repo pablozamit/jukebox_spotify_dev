@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -432,6 +433,75 @@ export default function ClientPage() {
     }
   };
 
+  // 7.1 Load All Songs
+    const handleLoadAllSongs = async () => {
+        if (!spotifyConfig || spotifyConfig.searchMode !== 'playlist' || !spotifyConfig.playlistId) {
+            toast({
+                title: 'Error de Configuración',
+                description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        setIsLoadingSearch(true);
+        try {
+            // Fetch all tracks from the playlist using multiple API calls if necessary
+            let allTracks: Song[] = [];
+            let offset = 0;
+            const limit = 50; // Maximum limit allowed by Spotify API
+            let hasMore = true;
+
+            while (hasMore) {
+                const url = `/api/searchSpotify?mode=playlist&playlistId=${spotifyConfig.playlistId}&offset=${offset}&limit=${limit}`;
+                const res = await fetch(url);
+
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || `Error ${res.status}`);
+                }
+
+                const data = await res.json();
+                if (!data.results || !Array.isArray(data.results)) {
+                    console.warn('Spotify API did not return expected "results" array:', data);
+                    hasMore = false; // Stop fetching if no results are returned
+                    break;
+                }
+
+                const tracks: Song[] = (data.results as any[]).map((t) => ({
+                    spotifyTrackId: t.id,
+                    title: t.name,
+                    artist: t.artists.map((a: any) => a.name).join(', '),
+                    albumArtUrl: t.album?.images?.[0]?.url ?? null,
+                }));
+
+                allTracks = allTracks.concat(tracks);
+
+                if (tracks.length < limit) {
+                    hasMore = false; // Stop fetching if fewer than the limit results are returned
+                } else {
+                    offset += limit; // Increment offset for the next API call
+                }
+            }
+
+            setSearchResults(allTracks);
+            toast({
+                title: 'Playlist Cargada',
+                description: `Se cargaron ${allTracks.length} canciones de la playlist.`,
+            });
+        } catch (error: any) {
+            console.error('Error al cargar todas las canciones:', error);
+            toast({
+                title: 'Error al Cargar Playlist',
+                description: error.message || 'No se pudieron cargar todas las canciones de la playlist.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsLoadingSearch(false);
+        }
+    };
+
+
   // 8. Quitar propia canción
   const handleRemoveSong = async (id: string) => {
     if (!db || !isDbValid) return;
@@ -705,10 +775,19 @@ export default function ClientPage() {
                   className="pl-10 pr-4 py-2 border-border focus:border-primary focus:ring-primary rounded-md"
                 />
               </div>
-              {/* Mensaje de ayuda dinámico (Mejora 2) */}
-              <p className="text-xs text-muted-foreground mt-2 italic">
-                Puedes añadir una canción o votar una ya añadida... pero no ambas.
-              </p>
+              <div className="flex justify-between items-center">
+                  <p className="text-xs text-muted-foreground mt-2 italic">
+                    Puedes añadir una canción o votar una ya añadida... pero no ambas.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadAllSongs}
+                    disabled={isLoadingConfig || !spotifyConfig || spotifyConfig.searchMode !== 'playlist' || !spotifyConfig.playlistId || isLoadingSearch}
+                  >
+                    {isLoadingSearch ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : 'Ver Todas las Canciones'}
+                  </Button>
+              </div>
               <ScrollArea className="flex-1 -mx-4 px-4">
                 <div className="space-y-2 pr-2 pb-4">
                   {isLoadingSearch ? (

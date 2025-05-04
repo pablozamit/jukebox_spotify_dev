@@ -20,8 +20,10 @@ export async function GET(request: Request) {
   const q = searchParams.get('q');
   const mode = searchParams.get('mode') ?? 'all';
   const playlistId = searchParams.get('playlistId') ?? '';
+  const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+  const limit = parseInt(searchParams.get('limit') ?? '20', 10);
 
-  if (!q) {
+  if (!q && mode === 'all') {
     return NextResponse.json({ error: 'Falta el parámetro q' }, { status: 400 });
   }
 
@@ -61,19 +63,24 @@ export async function GET(request: Request) {
         {
           headers: { Authorization: `Bearer ${accessToken}` },
           params: {
-            fields: 'items(track(id,name,artists(name),album(name,images),uri,preview_url))',
-            limit: 100,
+            fields: 'items(track(id,name,artists(name,href),album(name,images),uri,preview_url))',
+            limit: limit,
+            offset: offset,
           },
         }
       );
 
       const playlistTracks = plRes.data.items?.map(item => item.track).filter(Boolean) ?? [];
 
-      const ql = q.toLowerCase();
-      tracks = playlistTracks.filter((t) =>
-        (t.name && t.name.toLowerCase().includes(ql)) ||
-        (t.artists && t.artists.some((a) => a.name && a.name.toLowerCase().includes(ql)))
-      );
+      if (q) {
+        const ql = q.toLowerCase();
+        tracks = playlistTracks.filter((t) =>
+          (t.name && t.name.toLowerCase().includes(ql)) ||
+          (t.artists && t.artists.some((a) => a.name && a.name.toLowerCase().includes(ql)))
+        );
+      } else {
+          tracks = playlistTracks;
+      }
 
     } else {
       const srRes = await axios.get<{ tracks: { items: SpotifyTrackItem[] } }>(
@@ -102,6 +109,10 @@ export async function GET(request: Request) {
 
   } catch (e: any) {
     console.error("Error interacting with Spotify API:", e.response?.data || e.message || e);
+    // Handle common errors like playlist not found (404)
+    if (e.response?.status === 404) {
+      return NextResponse.json({ error: 'Playlist no encontrada' }, { status: 404 });
+    }
     return NextResponse.json({ error: 'Error al conectar con la API de Spotify' }, { status: 500 });
   }
 }

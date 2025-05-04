@@ -1,3 +1,4 @@
+
 // src/services/spotify.ts
 
 export interface Song {
@@ -34,7 +35,9 @@ interface SpotifyTrack {
  */
 export async function searchSpotify(
   searchTerm: string,
-  config: SpotifyConfig | null
+  config: SpotifyConfig | null,
+  offset: number = 0,
+  limit: number = 20,
 ): Promise<Song[]> {
   const mode = config?.searchMode ?? 'all';
   const playlistId = config?.playlistId;
@@ -43,6 +46,8 @@ export async function searchSpotify(
   const params = new URLSearchParams({ q: searchTerm, mode });
   if (mode === 'playlist' && playlistId) {
     params.set('playlistId', playlistId);
+    params.set('offset', String(offset));
+    params.set('limit', String(limit));
   }
 
   const res = await fetch(`/api/searchSpotify?${params.toString()}`);
