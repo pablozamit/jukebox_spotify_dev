@@ -102,9 +102,13 @@ export async function POST() {
     });
 
     if (!playRes.ok) {
-      const err = await playRes.json().catch(() => ({}));
+      const errBody = await playRes.text().catch(() => '');
+      console.error('❌ Spotify play error:', playRes.status, errBody);
+
       return NextResponse.json(
-        { error: err.error?.message || 'Failed to play track' },
+        {
+          error: `Spotify returned ${playRes.status}: ${errBody}`,
+        },
         { status: playRes.status }
       );
     }
