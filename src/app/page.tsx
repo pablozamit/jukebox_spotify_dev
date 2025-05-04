@@ -120,6 +120,31 @@ export default function ClientPage() {
     },
   });
 
+  // 1. Marcar componente montado
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // 1.1 Sincronización periódica cada 3 segundos
+  useEffect(() => {
+    let isSyncing = false;
+
+    const interval = setInterval(async () => {
+      if (isSyncing) return;
+      isSyncing = true;
+
+      try {
+        await fetch('/api/spotify/sync', { method: 'POST' });
+      } catch (e) {
+        console.error('Error syncing:', e);
+      } finally {
+        isSyncing = false;
+      }
+    }, 3000); // cada 3 segundos
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Efecto para sincronizar la siguiente canción cuando queda poco tiempo
   useEffect(() => {
     if (!currentPlaying?.isPlaying || !currentPlaying.track) return;
@@ -137,11 +162,6 @@ export default function ClientPage() {
       });
     }
   }, [currentPlaying]);
-
-  // 1. Marcar componente montado
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
 
   // 12. Reproducir siguiente canción automáticamente si no hay nada sonando
   useEffect(() => {
