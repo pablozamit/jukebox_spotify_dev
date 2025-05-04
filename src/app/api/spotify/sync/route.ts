@@ -55,6 +55,17 @@ export async function POST() {
       });
     }
 
+    // Verificar si ya hay una canción en reproducción
+    const currentRes = await axios.get('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    });
+
+    if (currentRes.status === 200 && currentRes.data?.is_playing) {
+      // Hay una canción sonando → NO hacer nada
+      return NextResponse.json({ message: 'Ya hay una canción reproduciéndose, no se fuerza cambio.' });
+    }
+
     // Verificar si hay algún dispositivo activo
     const deviceRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
       headers: {
@@ -107,16 +118,19 @@ export async function POST() {
     }
 
     // Reproducir la canción en el dispositivo activo
-    const playRes = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + activeDevice.id, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        uris: [`spotify:track:${topSong.spotifyTrackId}`],
-      }),
-    });
+    const playRes = await fetch(
+      'https://api.spotify.com/v1/me/player/play?device_id=' + activeDevice.id,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          uris: [`spotify:track:${topSong.spotifyTrackId}`],
+        }),
+      }
+    );
 
     if (!playRes.ok) {
       const errBody = await playRes.text().catch(() => '');
