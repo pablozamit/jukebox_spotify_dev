@@ -145,6 +145,34 @@ export default function ClientPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Efecto para detectar la finalización de la canción y sincronizar
+  useEffect(() => {
+    if (!currentPlaying?.isPlaying || !currentPlaying.track) return;
+
+    const { progress_ms, duration_ms } = currentPlaying.track;
+    // Considera un pequeño margen de error (500ms)
+    if (progress_ms >= duration_ms - 500 && !syncLock.current) {
+      console.log('Canción terminada, sincronizando...');
+      syncLock.current = true;
+
+      fetch('/api/spotify/sync', { method: 'POST' })
+        .catch((error) => {
+          console.error('Error al pedir la siguiente canción:', error);
+          toast({
+            title: 'Error de conexión',
+            description: 'No se pudo pedir la siguiente canción.',
+            variant: 'destructive',
+          });
+        })
+        .finally(() => {
+          // Desbloquear la siguiente sincronización después de unos segundos
+          setTimeout(() => {
+            syncLock.current = false;
+          }, 10000);
+        });
+    }
+  }, [currentPlaying, toast]);
+
   // Efecto para sincronizar la siguiente canción cuando queda poco tiempo
   useEffect(() => {
     if (!currentPlaying?.isPlaying || !currentPlaying.track) return;
