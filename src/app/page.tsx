@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import useSWR from 'swr';
 import {
   Card,
@@ -80,6 +80,7 @@ const fetcher = async (url: string) => {
 
 export default function ClientPage() {
   const { toast } = useToast();
+  const syncLock = useRef(false);
 
   // Estado general
   const [searchTerm, setSearchTerm] = useState('');
@@ -96,7 +97,7 @@ export default function ClientPage() {
   const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
-  // SWR para “currently playing”
+  // SWR para "currently playing"
   const { data: currentPlaying, error: currentError } = useSWR<{
     isPlaying: boolean;
     track?: {
@@ -108,7 +109,7 @@ export default function ClientPage() {
       duration_ms: number;
     };
   }>('/api/spotify/current', fetcher, {
-    refreshInterval: 5000,
+    refreshInterval: 3000,
     onError: (err) => {
       console.error('SWR current playing error:', err);
       toast({
@@ -119,10 +120,44 @@ export default function ClientPage() {
     },
   });
 
+  // Efecto para sincronizar la siguiente canción cuando queda poco tiempo
+  useEffect(() => {
+    if (!currentPlaying?.isPlaying || !currentPlaying.track) return;
+
+    const remaining = currentPlaying.track.duration_ms - currentPlaying.track.progress_ms;
+
+    if (remaining < 4000 && !syncLock.current) {
+      syncLock.current = true;
+
+      fetch('/api/spotify/sync', { method: 'POST' }).finally(() => {
+        // Esperamos 10s antes de permitir otra sincronización
+        setTimeout(() => {
+          syncLock.current = false;
+        }, 10000);
+      });
+    }
+  }, [currentPlaying]);
+
   // 1. Marcar componente montado
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // 12. Reproducir siguiente canción automáticamente si no hay nada sonando
+  useEffect(() => {
+    if (!isMounted || !currentPlaying) return;
+
+    if (!currentPlaying.isPlaying) {
+      // Esperar unos segundos para evitar llamadas duplicadas por errores temporales
+      const timeout = setTimeout(() => {
+        fetch('/api/spotify/sync', { method: 'POST' }).catch((err) =>
+          console.error('Error al llamar a /api/spotify/sync:', err)
+        );
+      }, 3000); // espera de 3 segundos
+
+      return () => clearTimeout(timeout);
+    }
+  }, [currentPlaying, isMounted]);
 
   // 2. Generar o recuperar sesión sencilla
   useEffect(() => {
