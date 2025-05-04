@@ -55,6 +55,23 @@ export async function POST() {
       });
     }
 
+    // Verificar si hay algún dispositivo activo
+    const deviceRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const deviceData = await deviceRes.json();
+    const activeDevice = deviceData.devices?.find((d: any) => d.is_active) ?? deviceData.devices?.[0];
+
+    if (!activeDevice?.id) {
+      return NextResponse.json(
+        { error: 'No active Spotify device found. Abre Spotify en algún dispositivo primero.' },
+        { status: 403 }
+      );
+    }
+
     // Leer la cola de canciones
     const queueSnap = await admin.database().ref('/queue').once('value');
     const queueData = queueSnap.val();
@@ -89,8 +106,8 @@ export async function POST() {
       return NextResponse.json({ message: 'No valid top song found' });
     }
 
-    // Reproducir la canción directamente
-    const playRes = await fetch('https://api.spotify.com/v1/me/player/play', {
+    // Reproducir la canción en el dispositivo activo
+    const playRes = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + activeDevice.id, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -104,11 +121,8 @@ export async function POST() {
     if (!playRes.ok) {
       const errBody = await playRes.text().catch(() => '');
       console.error('❌ Spotify play error:', playRes.status, errBody);
-
       return NextResponse.json(
-        {
-          error: `Spotify returned ${playRes.status}: ${errBody}`,
-        },
+        { error: `Spotify returned ${playRes.status}: ${errBody}` },
         { status: playRes.status }
       );
     }
