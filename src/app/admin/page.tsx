@@ -177,9 +177,16 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [toast]);
 
-  const handleRemoveSong = async (songId: string) => {
+ const handleRemoveSong = async (songId: string) => {
+    console.log(songId);
     if (!db) return;
-    await remove(ref(db, `/queue/${songId}`));
+    try{
+      await remove(ref(db, `/queue/${songId}`));
+      toast({ title: 'Canción eliminada', description: 'La canción ha sido eliminada de la cola.' });
+    }catch(e: any){
+      console.error('Error eliminando canción:', e);
+      toast({ title: 'Error', description: 'No se pudo eliminar la canción.', variant: 'destructive' });
+    }
   };
 
   const handleMove = async (index: number, direction: -1 | 1) => {

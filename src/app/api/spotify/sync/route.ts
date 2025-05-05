@@ -14,6 +14,7 @@ const SPOTIFY_BASE_URL = 'https://api.spotify.com/v1';
 // ───── Firebase ─────────────────────────────────
 const getFirebaseApp = () => {
   if (!admin.apps.length) {
+    console.log('[getFirebaseApp] Initializing Firebase App...');
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
       databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
@@ -50,10 +51,16 @@ async function callSpotifyApiWithRetry(
     console.error(`[callSpotifyApiWithRetry] Error on attempt ${retryCount + 1}: ${axiosError.message}`);
     console.error(`[callSpotifyApiWithRetry] Error details:`, axiosError.response?.data);
 
-    if (retryCount < MAX_RETRIES && axiosError.response?.status !== 401) {
-      console.warn(`[callSpotifyApiWithRetry] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
-      await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
-      return callSpotifyApiWithRetry(url, headers, method, body, retryCount + 1);
+    if (axiosError.response) {
+      if (axiosError.response.data && (axiosError.response.data as any).error) {
+        throw new Error(`Spotify API Error: ${(axiosError.response.data as any).error.message || 'Unknown error'}`);
+      } else if (axiosError.response.status !== 401) {
+        if (retryCount < MAX_RETRIES) {
+          console.warn(`[callSpotifyApiWithRetry] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+          await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
+          return callSpotifyApiWithRetry(url, headers, method, body, retryCount + 1);
+        }
+      }
     }
 
     throw axiosError;
@@ -80,6 +87,11 @@ async function handleTokenAndDevice(tokens: any): Promise<[string, string]> {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       }
     );
+
+    if (refreshRes.data && (refreshRes.data as any).error) {
+      throw new Error(`Error refreshing token: ${(refreshRes.data as any).error}`);
+    }
+
     console.log('[handleTokenAndDevice] Token refresh response:', refreshRes);
 
     const accessToken = refreshRes.data.access_token;
@@ -92,16 +104,20 @@ async function handleTokenAndDevice(tokens: any): Promise<[string, string]> {
     });
     console.log('[handleTokenAndDevice] Get active device response:', deviceRes);
 
+    if (deviceRes.data && (deviceRes.data as any).error) {
+      throw new Error(`Error getting device: ${(deviceRes.data as any).error}`);
+    }
+
     const device = deviceRes.data.devices.find((d: any) => d.is_active) || deviceRes.data.devices[0];
     console.log('[handleTokenAndDevice] Active device found:', device);
 
     if (!device?.id) throw new Error('No active Spotify devices found');
     console.log('[handleTokenAndDevice] handleTokenAndDevice finished successfully.');
     return [accessToken, device.id];
-  } catch (error) {
+  } catch (error: any) {
     console.error('[handleTokenAndDevice] Error in handleTokenAndDevice:', error);
-    console.error('[handleTokenAndDevice] Error details:', (error as any).response?.data);
-    throw new Error(`Error in handleTokenAndDevice: ${(error as any).message}`);
+    console.error('[handleTokenAndDevice] Error details:', error.response?.data);
+    throw new Error(`Error in handleTokenAndDevice: ${error.message}`);
   }
 }
 
@@ -112,14 +128,20 @@ async function checkPlaybackState(accessToken: string): Promise<boolean> {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
+    if (res.data && (res.data as any).error) {
+      throw new Error(`Error in checkPlaybackState: ${(res.data as any).error}`);
+    }
+
     const isPlaying = res.data?.is_playing;
     const progress = res.data?.progress_ms;
     const duration = res.data?.item?.duration_ms;
 
     const remaining = duration - progress;
     return !isPlaying || remaining < SAFETY_BUFFER_MS;
-  } catch (err) {
-    throw new Error(`Error in checkPlaybackState: ${(err as any).message}`);
+  } catch (error: any) {
+    console.error('[checkPlaybackState] Error checking playback state:', error);
+    console.error('[checkPlaybackState] Error details:', error.response?.data);
+    throw new Error(`Error in checkPlaybackState: ${error.message}`);
   }
 }
 
@@ -157,7 +179,7 @@ export async function POST() {
     const tokens = await db.ref('/admin/spotify/tokens').once('value').then((s) => s.val());
     if (!tokens) {
       console.error('[Sync] No hay tokens en Firebase.');
-      return NextResponse.json({ error: 'No Spotify tokens' }, { status: 400 });
+      return NextResponse.json({ error: 'No Spotify tokens found. Connect first.' }, { status: 400 });
     }
 
     let accessToken = '';
