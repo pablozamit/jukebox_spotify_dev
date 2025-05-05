@@ -49,7 +49,7 @@ async function callSpotifyApiWithRetry(
     console.error(`[Spotify API] Error on attempt ${retryCount + 1}: ${axiosError.message}`);
 
     if (retryCount < MAX_RETRIES && axiosError.response?.status !== 401) {
-      console.log(`[Spotify API] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+      console.warn(`[Spotify API] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
       await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
       return callSpotifyApiWithRetry(url, headers, method, body, retryCount + 1);
     }
@@ -60,32 +60,32 @@ async function callSpotifyApiWithRetry(
 
 // ───── Refrescar token y obtener device ─────────
 async function handleTokenAndDevice(tokens: any): Promise<[string, string]> {
-  // Refrescar access_token
-  const refreshRes = await axios.post(
-    'https://accounts.spotify.com/api/token',
-    new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refresh_token,
-      client_id: process.env.SPOTIFY_CLIENT_ID!,
-      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
-    }),
-    {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    }
-  );
+  try {
+    const refreshRes = await axios.post(
+      'https://accounts.spotify.com/api/token',
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: tokens.refresh_token,
+        client_id: process.env.SPOTIFY_CLIENT_ID!,
+        client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
+      }),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      }
+    );
+    const accessToken = refreshRes.data.access_token;
 
-  const accessToken = refreshRes.data.access_token;
+    const deviceRes = await axios.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-  // Obtener device activo
-  const deviceRes = await axios.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+    const device = deviceRes.data.devices.find((d: any) => d.is_active) || deviceRes.data.devices[0];
+    if (!device?.id) throw new Error('No active Spotify devices found');
 
-  const device = deviceRes.data.devices.find((d: any) => d.is_active) || deviceRes.data.devices[0];
-
-  if (!device?.id) throw new Error('No active Spotify devices found');
-
-  return [accessToken, device.id];
+    return [accessToken, device.id];
+  } catch (error) {
+    throw new Error(`Error in handleTokenAndDevice: ${(error as any).message}`);
+  }
 }
 
 // ───── Verificar si puede reproducirse otra ─────
@@ -100,11 +100,9 @@ async function checkPlaybackState(accessToken: string): Promise<boolean> {
     const duration = res.data?.item?.duration_ms;
 
     const remaining = duration - progress;
-
     return !isPlaying || remaining < SAFETY_BUFFER_MS;
   } catch (err) {
-    console.warn('[Sync] Error checking playback state. Assuming playback is off.');
-    return true;
+    throw new Error(`Error in checkPlaybackState: ${(err as any).message}`);
   }
 }
 
@@ -120,7 +118,6 @@ async function processQueue(db: admin.database.Database): Promise<any | null> {
   }));
 
   songs.sort((a, b) => a.order - b.order);
-
   return songs[0] || null;
 }
 
@@ -140,15 +137,21 @@ export async function POST() {
   try {
     console.log('[Sync] Iniciando sincronización...');
 
-    // 1. Leer tokens
     const tokens = await db.ref('/admin/spotify/tokens').once('value').then((s) => s.val());
     if (!tokens) {
       console.error('[Sync] No hay tokens en Firebase.');
       return NextResponse.json({ error: 'No Spotify tokens' }, { status: 400 });
     }
 
-    // 2. Obtener access_token y device_id
-    const [accessToken, deviceId] = await handleTokenAndDevice(tokens);
+    let accessToken = '';
+    let deviceId = '';
+    try {
+      [accessToken, deviceId] = await handleTokenAndDevice(tokens);
+    } catch (e: any) {
+      console.error('[Sync] No se pudo obtener accessToken o deviceId', e.message);
+      return NextResponse.json({ error: `Token o dispositivo inválido: ${e.message}` }, { status: 500 });
+    }
+
     if (!accessToken || !deviceId) {
       console.error('[Sync] No se pudo obtener accessToken o deviceId');
       return NextResponse.json({ error: 'Token o dispositivo inválido' }, { status: 500 });
@@ -156,15 +159,27 @@ export async function POST() {
 
     console.log(`[Sync] Token y device listos: ${deviceId.substring(0, 8)}...`);
 
-    // 3. Verificar estado actual de reproducción
-    const shouldSync = await checkPlaybackState(accessToken);
+    let shouldSync = false;
+    try {
+      shouldSync = await checkPlaybackState(accessToken);
+    } catch (e: any) {
+      console.error('[Sync] Error checking playback state.', e.message);
+      return NextResponse.json({ error: `Error checking playback state: ${e.message}` }, { status: 500 });
+    }
+
     if (!shouldSync) {
       console.log('[Sync] Spotify ya está reproduciendo. Abortando.');
       return NextResponse.json({ message: 'Playback in progress, skipping sync' });
     }
 
-    // 4. Leer la siguiente canción de la cola
-    const song = await processQueue(db);
+    let song = null;
+    try {
+      song = await processQueue(db);
+    } catch (e: any) {
+      console.error('[Sync] Error processQueue.', e.message);
+      return NextResponse.json({ error: `Error processing queue: ${e.message}` }, { status: 500 });
+    }
+
     if (!song) {
       console.log('[Sync] La cola está vacía.');
       return NextResponse.json({ message: 'Empty queue' });
@@ -172,17 +187,21 @@ export async function POST() {
 
     console.log(`[Sync] Próxima canción: ${song.title} (${song.spotifyTrackId})`);
 
-    // 5. Reproducir canción
-    await playTrack(accessToken, deviceId, song.spotifyTrackId);
+    try {
+      await playTrack(accessToken, deviceId, song.spotifyTrackId);
+    } catch (e: any) {
+      console.error('[Sync] Error playTrack.', e.message);
+      return NextResponse.json({ error: `Error playTrack: ${e.message}` }, { status: 500 });
+    }
+
     console.log(`[Sync] Reproduciendo: ${song.spotifyTrackId}`);
 
-    // 6. Eliminar canción de la cola
     await db.ref(`/queue/${song.id}`).remove();
     console.log(`[Sync] Canción eliminada de la cola: ${song.id}`);
 
     return NextResponse.json({ success: true, played: song });
   } catch (err: any) {
     console.error('[Sync] Error inesperado:', err);
-    return NextResponse.json({ error: 'Internal error', details: err.message }, { status: 500 });
+    return NextResponse.json({ error: `Internal error: ${err.message}` }, { status: 500 });
   }
 }

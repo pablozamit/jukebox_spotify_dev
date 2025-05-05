@@ -84,42 +84,62 @@ export default function AdminPage() {
     });
     return () => unsub();
   }, [router]);
+
   useEffect(() => {
     if (!db || !user) {
       setIsLoadingQueue(false);
       return;
     }
-    const queueRef = ref(db, '/queue');
-    setIsLoadingQueue(true);
-    const unsub = onValue(queueRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      const items = Object.entries(data)
-        .sort(([, a], [, b]) => ((a as any).order ?? 0) - ((b as any).order ?? 0)) // Ensure proper sorting
-        .map(([key, val]) => val ? ({ id: key, ...(val as any) }) : null) // Map to items, handling nulls
-        .filter(item => item !== null); // Filter out null entries
-      
-      if(items.length) setQueue(items as QueueSong[]);
-      setIsLoadingQueue(false);
-
-    });
-    return () => unsub();
-  }, [user]);
+    try {
+      const queueRef = ref(db, '/queue');
+      setIsLoadingQueue(true);
+      const unsub = onValue(queueRef, (snapshot) => {
+        try {
+          const data = snapshot.val() || {};
+          const items = Object.entries(data)
+            .sort(([, a], [, b]) => ((a as any).order ?? 0) - ((b as any).order ?? 0))
+            .map(([key, val]) => val ? ({ id: key, ...(val as any) }) : null)
+            .filter(item => item !== null);
+          
+          if(items.length) setQueue(items as QueueSong[]);
+        } catch (error) {
+          console.error('Error processing queue data:', error);
+          toast({ title: 'Error', description: 'Error al procesar la cola de reproducción.' });
+        } finally {
+          setIsLoadingQueue(false);
+        }
+      });
+      return () => unsub();
+    } catch (error) {
+      console.error('Error in queue onValue setup:', error);
+    }
+  }, [user, toast]);
 
   useEffect(() => {
     if (!db || !user) {
       setIsLoadingConfig(false);
       return;
     }
-    const cfgRef = ref(db, '/config');
-    setIsLoadingConfig(true);
-    const unsub = onValue(cfgRef, (snapshot) => {
-      const data = snapshot.val() || { searchMode: 'all' };
-      setConfig({ searchMode: data.searchMode, playlistId: data.playlistId });
-      setPlaylistIdInput(data.playlistId || '');
-      setIsLoadingConfig(false);
-    });
-    return () => unsub();
-  }, [user]);
+    try {
+      const cfgRef = ref(db, '/config');
+      setIsLoadingConfig(true);
+      const unsub = onValue(cfgRef, (snapshot) => {
+        try {
+          const data = snapshot.val() || { searchMode: 'all' };
+          setConfig({ searchMode: data.searchMode, playlistId: data.playlistId });
+          setPlaylistIdInput(data.playlistId || '');
+        } catch (error) {
+          console.error('Error processing config data:', error);
+          toast({ title: 'Error', description: 'Error al procesar la configuración.' });
+        } finally {
+          setIsLoadingConfig(false);
+        }
+      });
+      return () => unsub();
+    } catch (error) {
+      console.error('Error in config onValue setup:', error);
+    }
+  }, [user, toast]);
 
   useEffect(() => {
     const checkSpotify = async () => {
@@ -137,15 +157,14 @@ export default function AdminPage() {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('/api/spotify/sync');
+        const res = await fetch('/api/spotify/sync', { method: 'POST' });
         if (!res.ok) {
-          // Handle non-OK responses here
-          const errorText = await res.text(); // Get error as plain text
+          const errorText = await res.text();
           throw new Error(errorText || 'Error al sincronizar');
         }
         const json = await res.json();        
         if (json.action === 'started') {
-             toast({
+          toast({
             title: '🎵 Reproducción iniciada',
             description: `Ahora suena: ${json.track?.title}`,
           });
@@ -163,28 +182,25 @@ export default function AdminPage() {
     await remove(ref(db, `/queue/${songId}`));
   };
 
-const handleMove = async (index: number, direction: -1 | 1) => {
-  if (!db) return;
-  const newQueue = [...queue];
-  const target = index + direction;
-  if (target < 0 || target >= newQueue.length) return;
-  [newQueue[index], newQueue[target]] = [newQueue[target], newQueue[index]];
-  
-  const updates: Record<string, any> = {};
-  newQueue.forEach((song, i) => {
-    updates[`/queue/${song.id}/order`] = i * 1000;
-  });
-  
-  try {
-    // Update the database
-    await update(ref(db), updates);
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    if (!db) return;
+    const newQueue = [...queue];
+    const target = index + direction;
+    if (target < 0 || target >= newQueue.length) return;
+    [newQueue[index], newQueue[target]] = [newQueue[target], newQueue[index]];
     
-    // Update the local state after the database update
-    setQueue(newQueue);
-  } catch (error) {
-    console.error("Error updating queue order:", error);
-    toast({ title: 'Error', description: 'Error al actualizar el orden de la cola.' });
-  }
+    const updates: Record<string, any> = {};
+    newQueue.forEach((song, i) => {
+      updates[`/queue/${song.id}/order`] = i * 1000;
+    });
+    
+    try {
+      await update(ref(db), updates);
+      setQueue(newQueue);
+    } catch (error) {
+      console.error("Error updating queue order:", error);
+      toast({ title: 'Error', description: 'Error al actualizar el orden de la cola.' });
+    }
   };
 
   const handleSpotifyAction = async () => {
@@ -225,6 +241,7 @@ const handleMove = async (index: number, direction: -1 | 1) => {
       description: song.title,
     });
   };
+
   const doSearch = useCallback(async () => {
     if (!searchTerm.trim() || !config) {
       setSearchResults([]);
@@ -274,7 +291,13 @@ const handleMove = async (index: number, direction: -1 | 1) => {
     }
   };
 
-  if (loadingAuth) return <div className="p-4">🔄 Cargando...</div>;
+  if (loadingAuth) {
+    return <div className="p-4">🔄 Cargando...</div>;
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6">
@@ -419,14 +442,13 @@ const handleMove = async (index: number, direction: -1 | 1) => {
                   onChange={(e) => setPlaylistIdInput(e.target.value)}
                 />
                 <Button
-  onClick={() => {
-    if (!db) return;
-    update(ref(db, '/config'), { playlistId: playlistIdInput.trim() });
-  }}
->
-  Guardar
-</Button>
-
+                  onClick={() => {
+                    if (!db) return;
+                    update(ref(db, '/config'), { playlistId: playlistIdInput.trim() });
+                  }}
+                >
+                  Guardar
+                </Button>
               </div>
             )}
             <div className="flex justify-center">
