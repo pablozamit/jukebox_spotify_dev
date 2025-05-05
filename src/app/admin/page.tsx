@@ -138,10 +138,14 @@ export default function AdminPage() {
     const interval = setInterval(async () => {
       try {
         const res = await fetch('/api/spotify/sync');
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Error al sincronizar');
+        if (!res.ok) {
+          // Handle non-OK responses here
+          const errorText = await res.text(); // Get error as plain text
+          throw new Error(errorText || 'Error al sincronizar');
+        }
+        const json = await res.json();        
         if (json.action === 'started') {
-          toast({
+             toast({
             title: '🎵 Reproducción iniciada',
             description: `Ahora suena: ${json.track?.title}`,
           });
@@ -293,7 +297,7 @@ const handleMove = async (index: number, direction: -1 | 1) => {
                   className="rounded shadow"
                 />
                 <div className="flex-1">
-                  <p className="font-semibold truncate">{currentPlaying.track.name}</p>
+                  <p className="font-semibold truncate ">{currentPlaying.track.name}</p>
                   <p className="text-sm text-muted-foreground truncate">{currentPlaying.track.artists.join(', ')}</p>
                   <progress
                     value={currentPlaying.track.progress_ms}
