@@ -94,11 +94,11 @@ export async function GET(request: Request) {
     }
 
     const results = tracks.map(t => ({
-      id: t.id,
-      name: t.name,
-      artists: t.artists?.map(a => a.name) ?? [],
+      spotifyTrackId: t.id,
+      title: t.name,
+      artist: t.artists?.[0]?.name ?? '',
       album: {
-        name: t.album?.name,
+        name: t.album?.name ?? "",
         images: t.album?.images,
       },
       uri: t.uri,

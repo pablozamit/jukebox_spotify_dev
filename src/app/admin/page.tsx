@@ -95,10 +95,13 @@ export default function AdminPage() {
     const unsub = onValue(queueRef, (snapshot) => {
       const data = snapshot.val() || {};
       const items = Object.entries(data)
-        .sort(([, a], [, b]) => ((a as any).order ?? 0) - ((b as any).order ?? 0))
-        .map(([key, val]) => ({ id: key, ...(val as any) }));
-      setQueue(items as QueueSong[]);
+        .sort(([, a], [, b]) => ((a as any).order ?? 0) - ((b as any).order ?? 0)) // Ensure proper sorting
+        .map(([key, val]) => val ? ({ id: key, ...(val as any) }) : null) // Map to items, handling nulls
+        .filter(item => item !== null); // Filter out null entries
+      
+      if(items.length) setQueue(items as QueueSong[]);
       setIsLoadingQueue(false);
+
     });
     return () => unsub();
   }, [user]);
