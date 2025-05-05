@@ -55,7 +55,6 @@ const fetcher = async (url: string) => {
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const syncLock = useRef(false);
 
   const [user, setUser] = useState<User | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -160,17 +159,28 @@ export default function AdminPage() {
     await remove(ref(db, `/queue/${songId}`));
   };
 
-  const handleMove = async (index: number, direction: -1 | 1) => {
-    if (!db) return;
-    const newQueue = [...queue];
-    const target = index + direction;
-    if (target < 0 || target >= newQueue.length) return;
-    [newQueue[index], newQueue[target]] = [newQueue[target], newQueue[index]];
-    const updates: Record<string, any> = {};
-    newQueue.forEach((song, i) => {
-      updates[`/queue/${song.id}/order`] = i * 1000;
-    });
+const handleMove = async (index: number, direction: -1 | 1) => {
+  if (!db) return;
+  const newQueue = [...queue];
+  const target = index + direction;
+  if (target < 0 || target >= newQueue.length) return;
+  [newQueue[index], newQueue[target]] = [newQueue[target], newQueue[index]];
+  
+  const updates: Record<string, any> = {};
+  newQueue.forEach((song, i) => {
+    updates[`/queue/${song.id}/order`] = i * 1000;
+  });
+  
+  try {
+    // Update the database
     await update(ref(db), updates);
+    
+    // Update the local state after the database update
+    setQueue(newQueue);
+  } catch (error) {
+    console.error("Error updating queue order:", error);
+    toast({ title: 'Error', description: 'Error al actualizar el orden de la cola.' });
+  }
   };
 
   const handleSpotifyAction = async () => {
@@ -250,7 +260,9 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}`);
       const data = await res.json();
-      setSearchResults(data.results || []);
+      if(data.results){
+        setSearchResults(data.results || []);
+      }
     } catch (e: any) {
       toast({ title: 'Error al cargar', description: e.message });
     } finally {
