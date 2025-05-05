@@ -35,21 +35,23 @@ async function callSpotifyApiWithRetry(
   body: any = null,
   retryCount = 0
 ): Promise<any> {
+  console.log(`[callSpotifyApiWithRetry] Attempt ${retryCount + 1}: ${method.toUpperCase()} ${url}`);
   try {
-    console.log(`[Spotify API] Attempt ${retryCount + 1}: ${method.toUpperCase()} ${url}`);
     const res = await httpClient({
       url,
       method,
       headers,
       data: body,
     });
+    console.log(`[callSpotifyApiWithRetry] Attempt ${retryCount + 1} success: ${method.toUpperCase()} ${url}`, res);
     return res.data;
   } catch (error: any) {
     const axiosError = error as AxiosError;
-    console.error(`[Spotify API] Error on attempt ${retryCount + 1}: ${axiosError.message}`);
+    console.error(`[callSpotifyApiWithRetry] Error on attempt ${retryCount + 1}: ${axiosError.message}`);
+    console.error(`[callSpotifyApiWithRetry] Error details:`, axiosError.response?.data);
 
     if (retryCount < MAX_RETRIES && axiosError.response?.status !== 401) {
-      console.warn(`[Spotify API] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+      console.warn(`[callSpotifyApiWithRetry] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
       await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
       return callSpotifyApiWithRetry(url, headers, method, body, retryCount + 1);
     }
@@ -60,7 +62,12 @@ async function callSpotifyApiWithRetry(
 
 // ───── Refrescar token y obtener device ─────────
 async function handleTokenAndDevice(tokens: any): Promise<[string, string]> {
+  console.log('[handleTokenAndDevice] Starting handleTokenAndDevice...');
   try {
+    console.log('[handleTokenAndDevice] Tokens received:', tokens);
+
+    // Refrescar access_token
+    console.log('[handleTokenAndDevice] Attempting to refresh access token...');
     const refreshRes = await axios.post(
       'https://accounts.spotify.com/api/token',
       new URLSearchParams({
@@ -73,17 +80,27 @@ async function handleTokenAndDevice(tokens: any): Promise<[string, string]> {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       }
     );
-    const accessToken = refreshRes.data.access_token;
+    console.log('[handleTokenAndDevice] Token refresh response:', refreshRes);
 
+    const accessToken = refreshRes.data.access_token;
+    console.log('[handleTokenAndDevice] New access token:', accessToken);
+
+    // Obtener device activo
+    console.log('[handleTokenAndDevice] Attempting to get active device...');
     const deviceRes = await axios.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
+    console.log('[handleTokenAndDevice] Get active device response:', deviceRes);
 
     const device = deviceRes.data.devices.find((d: any) => d.is_active) || deviceRes.data.devices[0];
-    if (!device?.id) throw new Error('No active Spotify devices found');
+    console.log('[handleTokenAndDevice] Active device found:', device);
 
+    if (!device?.id) throw new Error('No active Spotify devices found');
+    console.log('[handleTokenAndDevice] handleTokenAndDevice finished successfully.');
     return [accessToken, device.id];
   } catch (error) {
+    console.error('[handleTokenAndDevice] Error in handleTokenAndDevice:', error);
+    console.error('[handleTokenAndDevice] Error details:', (error as any).response?.data);
     throw new Error(`Error in handleTokenAndDevice: ${(error as any).message}`);
   }
 }
