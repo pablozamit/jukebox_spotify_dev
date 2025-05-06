@@ -48,12 +48,17 @@ import {
 } from '@/components/ui/tooltip';
 
 // Definir interfaces con tipado estricto
-interface QueueSong extends Song {
+interface QueueSong {
   id: string;
+  title: string;
+  artist: string;
+  spotifyTrackId: string;
+  albumArtUrl: string | null;
+  addedByUserId: string;
   timestampAdded: number;
-  addedByUserId?: string;
-  order?: number;
+  order: number;
 }
+
 
 interface PlaylistDetails {
   name: string;
@@ -306,15 +311,44 @@ export default function ClientPage() {
       qRef,
       (snap) => {
         const data = snap.val() || {};
-        const items = Object.entries(data as Record<string, Omit<QueueSong, 'id'>>)
-          .map(([key, val]) => ({
-            id: key,
-            ...val,
-            timestampAdded: typeof val.timestampAdded === 'number' ? val.timestampAdded : 0,
-            order: typeof val.order === 'number' ? val.order : val.timestampAdded ?? 0,
-          }))
-          .sort((a, b) => a.order - b.order);
-        setQueue(items);
+        const items = Object.entries(data || {})
+  .map(([key, val]) => {
+    const song = val as any;
+
+    if (
+      !song ||
+      typeof song !== 'object' ||
+      typeof song.title !== 'string' ||
+      typeof song.artist !== 'string' ||
+      typeof song.spotifyTrackId !== 'string'
+    ) {
+      return null;
+    }
+
+    const timestampAdded = typeof song.timestampAdded === 'number' ? song.timestampAdded : 0;
+    const order = typeof song.order === 'number' ? song.order : timestampAdded;
+
+    const result: QueueSong = {
+      id: key,
+      title: song.title,
+      artist: song.artist,
+      spotifyTrackId: song.spotifyTrackId,
+      albumArtUrl: song.albumArtUrl ?? null,
+      addedByUserId: song.addedByUserId ?? '',
+      timestampAdded,
+      order,
+    };
+
+    return result;
+  })
+  .filter((item): item is QueueSong => item !== null)
+  .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0));
+
+
+
+
+        setQueue(items as QueueSong[]);
+
         setIsLoadingQueue(false);
         if (userSessionId) {
           setCanAddSong(!items.some((s) => s.addedByUserId === userSessionId));
@@ -368,11 +402,34 @@ export default function ClientPage() {
     }
   }, [searchTerm, spotifyConfig, isLoadingConfig, toast]);
 
-  useEffect(() => {
-    if (!isMounted || isLoadingConfig) return;
-    const id = setTimeout(doSearch, 500);
-    return () => clearTimeout(id);
-  }, [searchTerm, doSearch, isMounted, isLoadingConfig]);
+  // Este sigue siendo el de búsqueda — se deja tal cual
+useEffect(() => {
+  if (!isMounted || isLoadingConfig) return;
+  const id = setTimeout(doSearch, 500);
+  return () => clearTimeout(id);
+}, [searchTerm, doSearch, isMounted, isLoadingConfig]);
+
+// Este es NUEVO: detecta que faltan menos de 3 segundos para que termine
+useEffect(() => {
+  if (!currentPlaying?.track) return;
+
+  const remaining = currentPlaying.track.duration_ms - currentPlaying.track.progress_ms;
+
+  if (remaining < 3000 && !syncLock.current) {
+    syncLock.current = true;
+
+    fetch('/api/spotify/sync', { method: 'POST' })
+      .catch((error) => {
+        console.error('Error al sincronizar siguiente canción:', error);
+      })
+      .finally(() => {
+        setTimeout(() => {
+          syncLock.current = false;
+        }, 10000);
+      });
+  }
+}, [currentPlaying]);
+
 
   // 7. Añadir canción a la cola
   const handleAddSong = async (song: Song) => {
@@ -409,7 +466,7 @@ export default function ClientPage() {
       spotifyTrackId: song.spotifyTrackId,
       title: song.title,
       artist: song.artist,
-      albumArtUrl: song.albumArtUrl,
+      albumArtUrl: song.albumArtUrl ?? null,
       addedByUserId: userSessionId,
       timestampAdded: 0,
       order: maxOrder + 1000,
