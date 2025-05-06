@@ -4,7 +4,6 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import * as admin from 'firebase-admin';
 import axios from 'axios';
-import { cookies } from 'next/headers';
 
 // ❶ Inicializa Admin SDK si no está iniciado
 try {
@@ -41,25 +40,33 @@ export async function GET(request: NextRequest) {
 
     console.log('[Callback] Parámetros recibidos:', { code, error, state });
 
-    const cookieStore = await cookies();
-    const storedState = (await cookieStore).get('spotify_auth_state')?.value;
+    const cookieHeader = request.headers.get('cookie') || '';
+    const storedState = cookieHeader
+      .split(';')
+      .find((c) => c.trim().startsWith('spotify_auth_state='))
+      ?.split('=')[1];
+
     console.log('[Callback] State en cookie:', storedState);
 
     if (!state || state !== storedState) {
       console.warn('[Callback] State mismatch, posible ataque CSRF');
-      (await cookieStore).delete('spotify_auth_state');
-      return NextResponse.redirect(`${baseUrl}/admin?error=state_mismatch`);
+      const response = NextResponse.redirect(`${baseUrl}/admin?error=state_mismatch`);
+      response.headers.set('Set-Cookie', 'spotify_auth_state=; Path=/; Max-Age=0');
+      return response;
     }
-    (await cookieStore).delete('spotify_auth_state');
 
     if (error) {
       console.error('[Callback] Error recibido desde Spotify:', error);
-      return NextResponse.redirect(`${baseUrl}/admin?error=${encodeURIComponent(error)}`);
+      const response = NextResponse.redirect(`${baseUrl}/admin?error=${encodeURIComponent(error)}`);
+      response.headers.set('Set-Cookie', 'spotify_auth_state=; Path=/; Max-Age=0');
+      return response;
     }
 
     if (!code) {
       console.error('[Callback] No se recibió código de autorización.');
-      return NextResponse.redirect(`${baseUrl}/admin?error=no_code`);
+      const response = NextResponse.redirect(`${baseUrl}/admin?error=no_code`);
+      response.headers.set('Set-Cookie', 'spotify_auth_state=; Path=/; Max-Age=0');
+      return response;
     }
 
     console.log('[Callback] Intercambiando código por tokens...');
@@ -85,7 +92,9 @@ export async function GET(request: NextRequest) {
 
     if (!access_token || !refresh_token || typeof expires_in !== 'number') {
       console.error('[Callback] Tokens incompletos:', tokenRes.data);
-      return NextResponse.redirect(`${baseUrl}/admin?error=incomplete_tokens`);
+      const response = NextResponse.redirect(`${baseUrl}/admin?error=incomplete_tokens`);
+      response.headers.set('Set-Cookie', 'spotify_auth_state=; Path=/; Max-Age=0');
+      return response;
     }
 
     const expiresAt = Date.now() + expires_in * 1000;
@@ -101,11 +110,15 @@ export async function GET(request: NextRequest) {
       });
 
     console.log('[Callback] Tokens guardados. Redirigiendo a /admin');
-    return NextResponse.redirect(`${baseUrl}/admin?success=spotify_connected`);
+    const response = NextResponse.redirect(`${baseUrl}/admin?success=spotify_connected`);
+    response.headers.set('Set-Cookie', 'spotify_auth_state=; Path=/; Max-Age=0');
+    return response;
 
   } catch (e: any) {
     const msg = e?.response?.data?.error_description || e?.message || 'Unknown error';
     console.error('[Callback] ERROR FATAL en callback:', msg, e);
-    return NextResponse.redirect(`${process.env.BASE_URL}/admin?error=${encodeURIComponent(msg)}`);
+    const response = NextResponse.redirect(`${process.env.BASE_URL}/admin?error=${encodeURIComponent(msg)}`);
+    response.headers.set('Set-Cookie', 'spotify_auth_state=; Path=/; Max-Age=0');
+    return response;
   }
 }
