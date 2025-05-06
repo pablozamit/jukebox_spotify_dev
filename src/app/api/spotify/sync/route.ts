@@ -17,7 +17,8 @@ const getFirebaseApp = () => {
     console.log('[getFirebaseApp] Initializing Firebase App...');
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
-      databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+      databaseURL: process.env.FIREBASE_DATABASE_URL
+,
     });
   }
   return admin.app();
