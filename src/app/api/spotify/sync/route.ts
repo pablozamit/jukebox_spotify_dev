@@ -183,43 +183,16 @@ export async function POST() {
       return NextResponse.json({ error: 'No Spotify tokens found. Connect first.' }, { status: 400 });
     }
 
-    let accessToken = '';
-    let deviceId = '';
-    try {
-      [accessToken, deviceId] = await handleTokenAndDevice(tokens);
-    } catch (e: any) {
-      console.error('[Sync] No se pudo obtener accessToken o deviceId', e.message);
-      return NextResponse.json({ error: `Token o dispositivo inválido: ${e.message}` }, { status: 500 });
-    }
-
-    if (!accessToken || !deviceId) {
-      console.error('[Sync] No se pudo obtener accessToken o deviceId');
-      return NextResponse.json({ error: 'Token o dispositivo inválido' }, { status: 500 });
-    }
-
+    const [accessToken, deviceId] = await handleTokenAndDevice(tokens);
     console.log(`[Sync] Token y device listos: ${deviceId.substring(0, 8)}...`);
 
-    let shouldSync = false;
-    try {
-      shouldSync = await checkPlaybackState(accessToken);
-    } catch (e: any) {
-      console.error('[Sync] Error checking playback state.', e.message);
-      return NextResponse.json({ error: `Error checking playback state: ${e.message}` }, { status: 500 });
-    }
-
+    const shouldSync = await checkPlaybackState(accessToken);
     if (!shouldSync) {
       console.log('[Sync] Spotify ya está reproduciendo. Abortando.');
       return NextResponse.json({ message: 'Playback in progress, skipping sync' });
     }
 
-    let song = null;
-    try {
-      song = await processQueue(db);
-    } catch (e: any) {
-      console.error('[Sync] Error processQueue.', e.message);
-      return NextResponse.json({ error: `Error processing queue: ${e.message}` }, { status: 500 });
-    }
-
+    const song = await processQueue(db);
     if (!song) {
       console.log('[Sync] La cola está vacía.');
       return NextResponse.json({ message: 'Empty queue' });
@@ -227,19 +200,28 @@ export async function POST() {
 
     console.log(`[Sync] Próxima canción: ${song.title} (${song.spotifyTrackId})`);
 
-    try {
-      await playTrack(accessToken, deviceId, song.spotifyTrackId);
-    } catch (e: any) {
-      console.error('[Sync] Error playTrack.', e.message);
-      return NextResponse.json({ error: `Error playTrack: ${e.message}` }, { status: 500 });
+    await playTrack(accessToken, deviceId, song.spotifyTrackId);
+    console.log(`[Sync] Reproducción enviada a Spotify: ${song.spotifyTrackId}`);
+
+    await new Promise((res) => setTimeout(res, 1500)); // pequeño delay
+
+    const playback = await callSpotifyApiWithRetry(`${SPOTIFY_BASE_URL}/me/player`, {
+      Authorization: `Bearer ${accessToken}`,
+    }, 'get');
+
+    const currentTrackId = playback?.item?.id;
+    const isPlaying = playback?.is_playing;
+
+    if (isPlaying && currentTrackId === song.spotifyTrackId) {
+      console.log(`[Sync] Confirmado: Spotify está reproduciendo ${currentTrackId}`);
+      await db.ref(`/queue/${song.id}`).remove();
+      console.log(`[Sync] Canción eliminada de la cola: ${song.id}`);
+      return NextResponse.json({ success: true, played: song });
+    } else {
+      console.warn('[Sync] La canción no se está reproduciendo aún. No se elimina de la cola.');
+      return NextResponse.json({ warning: 'Track not confirmed as playing', queued: song });
     }
 
-    console.log(`[Sync] Reproduciendo: ${song.spotifyTrackId}`);
-
-    await db.ref(`/queue/${song.id}`).remove();
-    console.log(`[Sync] Canción eliminada de la cola: ${song.id}`);
-
-    return NextResponse.json({ success: true, played: song });
   } catch (err: any) {
     console.error('[Sync] Error inesperado:', err);
     return NextResponse.json({ error: `Internal error: ${err.message}` }, { status: 500 });
