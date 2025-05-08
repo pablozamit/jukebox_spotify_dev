@@ -1,157 +1,90 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import * as admin from 'firebase-admin';
 
-// ───── Configuración ────────────────────────────
-const SPOTIFY_API_TIMEOUT = 5000;
-const SAFETY_BUFFER_MS = 3000;
-const RETRY_DELAY_MS = 30000;
-const MAX_RETRIES = 3;
 const SPOTIFY_BASE_URL = 'https://api.spotify.com/v1';
+const SAFETY_BUFFER_MS = 3000;
+const SPOTIFY_API_TIMEOUT = 5000;
 
-// ───── Firebase ─────────────────────────────────
+const httpClient = axios.create({ timeout: SPOTIFY_API_TIMEOUT });
+
 const getFirebaseApp = () => {
   if (!admin.apps.length) {
-    console.log('[getFirebaseApp] Initializing Firebase App...');
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
-      databaseURL: process.env.FIREBASE_DATABASE_URL
-,
+      databaseURL: process.env.FIREBASE_DATABASE_URL,
     });
   }
   return admin.app();
 };
 
-// ───── Axios reutilizable ───────────────────────
-const httpClient = axios.create({
-  timeout: SPOTIFY_API_TIMEOUT,
-});
-
-// ───── Reintento automático Spotify API ─────────
-async function callSpotifyApiWithRetry(
-  url: string,
-  headers: any,
-  method: 'get' | 'post' | 'put' | 'delete',
-  body: any = null,
-  retryCount = 0
-): Promise<any> {
-  console.log(`[callSpotifyApiWithRetry] Attempt ${retryCount + 1}: ${method.toUpperCase()} ${url}`);
-  try {
-    const res = await httpClient({
-      url,
-      method,
-      headers,
-      data: body,
-    });
-    console.log(`[callSpotifyApiWithRetry] Attempt ${retryCount + 1} success: ${method.toUpperCase()} ${url}`, res);
-    return res.data;
-  } catch (error: any) {
-    const axiosError = error as AxiosError;
-    console.error(`[callSpotifyApiWithRetry] Error on attempt ${retryCount + 1}: ${axiosError.message}`);
-    console.error(`[callSpotifyApiWithRetry] Error details:`, axiosError.response?.data);
-
-    if (axiosError.response) {
-      if (axiosError.response.data && (axiosError.response.data as any).error) {
-        throw new Error(`Spotify API Error: ${(axiosError.response.data as any).error.message || 'Unknown error'}`);
-      } else if (axiosError.response.status !== 401) {
-        if (retryCount < MAX_RETRIES) {
-          console.warn(`[callSpotifyApiWithRetry] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
-          await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
-          return callSpotifyApiWithRetry(url, headers, method, body, retryCount + 1);
-        }
-      }
-    }
-
-    throw axiosError;
+async function refreshTokenIfNeeded(tokens: any): Promise<string> {
+  const now = Date.now();
+  if (tokens.expiresAt && tokens.expiresAt > now + 60_000) {
+    return tokens.accessToken;
   }
+
+  const refreshRes = await axios.post(
+    'https://accounts.spotify.com/api/token',
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refreshToken,
+      client_id: process.env.SPOTIFY_CLIENT_ID!,
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+
+  const newAccessToken = refreshRes.data.access_token;
+  const expiresIn = refreshRes.data.expires_in || 3600;
+
+  const db = getFirebaseApp().database();
+  await db.ref('/admin/spotify/tokens').update({
+    accessToken: newAccessToken,
+    expiresAt: now + expiresIn * 1000,
+  });
+
+  return newAccessToken;
 }
 
-// ───── Refrescar token y obtener device ─────────
-async function handleTokenAndDevice(tokens: any): Promise<[string, string]> {
-  console.log('[handleTokenAndDevice] Starting handleTokenAndDevice...');
-  try {
-    console.log('[handleTokenAndDevice] Tokens received:', tokens);
+async function getActiveDeviceId(accessToken: string): Promise<string> {
+  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-    // Refrescar access_token
-    console.log('[handleTokenAndDevice] Attempting to refresh access token...');
-    const refreshRes = await axios.post(
-      'https://accounts.spotify.com/api/token',
-      new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: tokens.refresh_token,
-        client_id: process.env.SPOTIFY_CLIENT_ID!,
-        client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
-      }),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      }
-    );
-
-    if (refreshRes.data && (refreshRes.data as any).error) {
-      throw new Error(`Error refreshing token: ${(refreshRes.data as any).error}`);
-    }
-
-    console.log('[handleTokenAndDevice] Token refresh response:', refreshRes);
-
-    const accessToken = refreshRes.data.access_token;
-    console.log('[handleTokenAndDevice] New access token:', accessToken);
-
-    // Obtener device activo
-    console.log('[handleTokenAndDevice] Attempting to get active device...');
-    const deviceRes = await axios.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    console.log('[handleTokenAndDevice] Get active device response:', deviceRes);
-
-    if (deviceRes.data && (deviceRes.data as any).error) {
-      throw new Error(`Error getting device: ${(deviceRes.data as any).error}`);
-    }
-
-    const device = deviceRes.data.devices.find((d: any) => d.is_active) || deviceRes.data.devices[0];
-    console.log('[handleTokenAndDevice] Active device found:', device);
-
-    if (!device?.id) throw new Error('No active Spotify devices found');
-    console.log('[handleTokenAndDevice] handleTokenAndDevice finished successfully.');
-    return [accessToken, device.id];
-  } catch (error: any) {
-    console.error('[handleTokenAndDevice] Error in handleTokenAndDevice:', error);
-    console.error('[handleTokenAndDevice] Error details:', error.response?.data);
-    throw new Error(`Error in handleTokenAndDevice: ${error.message}`);
-  }
+  const device = res.data.devices.find((d: any) => d.is_active) || res.data.devices[0];
+  if (!device?.id) throw new Error('No active Spotify devices found');
+  return device.id;
 }
 
-// ───── Verificar si puede reproducirse otra ─────
-async function checkPlaybackState(accessToken: string): Promise<boolean> {
-  try {
-    const res = await axios.get(`${SPOTIFY_BASE_URL}/me/player`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+async function checkShouldPlay(accessToken: string): Promise<boolean> {
+  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-    if (res.data && (res.data as any).error) {
-      throw new Error(`Error in checkPlaybackState: ${(res.data as any).error}`);
-    }
+  const isPlaying = res.data?.is_playing;
+  const progress = res.data?.progress_ms;
+  const duration = res.data?.item?.duration_ms;
+  const remaining = duration - progress;
 
-    const isPlaying = res.data?.is_playing;
-    const progress = res.data?.progress_ms;
-    const duration = res.data?.item?.duration_ms;
-
-    const remaining = duration - progress;
-    return !isPlaying || remaining < SAFETY_BUFFER_MS;
-  } catch (error: any) {
-    console.error('[checkPlaybackState] Error checking playback state:', error);
-    console.error('[checkPlaybackState] Error details:', error.response?.data);
-    throw new Error(`Error in checkPlaybackState: ${error.message}`);
-  }
+  return !isPlaying || remaining < SAFETY_BUFFER_MS;
 }
 
-// ───── Leer la cola de Firebase ─────────────────
-async function processQueue(db: admin.database.Database): Promise<any | null> {
+async function playTrack(accessToken: string, deviceId: string, trackId: string) {
+  const url = `${SPOTIFY_BASE_URL}/me/player/play?device_id=${deviceId}`;
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const body = { uris: [`spotify:track:${trackId}`] };
+
+  await httpClient.put(url, body, { headers });
+}
+
+async function getNextTrack(db: admin.database.Database): Promise<any | null> {
   const snap = await db.ref('/queue').once('value');
-  const data = snap.val() || {};
+  const queue = snap.val() || {};
 
-  const songs = Object.entries(data).map(([id, val]: any) => ({
+  const songs = Object.entries(queue).map(([id, val]: any) => ({
     id,
     ...val,
     order: val.order ?? val.timestampAdded ?? 0,
@@ -161,69 +94,58 @@ async function processQueue(db: admin.database.Database): Promise<any | null> {
   return songs[0] || null;
 }
 
-// ───── Enviar canción a reproducir ──────────────
-async function playTrack(accessToken: string, deviceId: string, spotifyTrackId: string) {
-  const url = `${SPOTIFY_BASE_URL}/me/player/play?device_id=${deviceId}`;
-  const headers = { Authorization: `Bearer ${accessToken}` };
-  const body = { uris: [`spotify:track:${spotifyTrackId}`] };
-
-  await callSpotifyApiWithRetry(url, headers, 'put', body);
+async function logError(message: string) {
+  const db = getFirebaseApp().database();
+  await db.ref('/admin/spotify/lastError').set({
+    message,
+    timestamp: Date.now(),
+  });
 }
 
-// ───── Ruta principal ───────────────────────────
 export async function POST() {
   const db = getFirebaseApp().database();
 
   try {
-    console.log('[Sync] Iniciando sincronización...');
+    const tokensSnap = await db.ref('/admin/spotify/tokens').once('value');
+    const tokens = tokensSnap.val();
 
-    const tokens = await db.ref('/admin/spotify/tokens').once('value').then((s) => s.val());
-    if (!tokens) {
-      console.error('[Sync] No hay tokens en Firebase.');
-      return NextResponse.json({ error: 'No Spotify tokens found. Connect first.' }, { status: 400 });
+    if (!tokens?.refreshToken) {
+      await logError('No tokens found in database');
+      return NextResponse.json({ error: 'No tokens found' }, { status: 400 });
     }
 
-    const [accessToken, deviceId] = await handleTokenAndDevice(tokens);
-    console.log(`[Sync] Token y device listos: ${deviceId.substring(0, 8)}...`);
+    const accessToken = await refreshTokenIfNeeded(tokens);
+    const deviceId = await getActiveDeviceId(accessToken);
 
-    const shouldSync = await checkPlaybackState(accessToken);
-    if (!shouldSync) {
-      console.log('[Sync] Spotify ya está reproduciendo. Abortando.');
+    const shouldPlay = await checkShouldPlay(accessToken);
+    if (!shouldPlay) {
       return NextResponse.json({ message: 'Playback in progress, skipping sync' });
     }
 
-    const song = await processQueue(db);
+    const song = await getNextTrack(db);
     if (!song) {
-      console.log('[Sync] La cola está vacía.');
-      return NextResponse.json({ message: 'Empty queue' });
+      return NextResponse.json({ message: 'Queue is empty' });
     }
 
-    console.log(`[Sync] Próxima canción: ${song.title} (${song.spotifyTrackId})`);
-
     await playTrack(accessToken, deviceId, song.spotifyTrackId);
-    console.log(`[Sync] Reproducción enviada a Spotify: ${song.spotifyTrackId}`);
+    await new Promise((res) => setTimeout(res, 1500));
 
-    await new Promise((res) => setTimeout(res, 1500)); // pequeño delay
+    const playback = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-    const playback = await callSpotifyApiWithRetry(`${SPOTIFY_BASE_URL}/me/player`, {
-      Authorization: `Bearer ${accessToken}`,
-    }, 'get');
-
-    const currentTrackId = playback?.item?.id;
-    const isPlaying = playback?.is_playing;
+    const currentTrackId = playback.data?.item?.id;
+    const isPlaying = playback.data?.is_playing;
 
     if (isPlaying && currentTrackId === song.spotifyTrackId) {
-      console.log(`[Sync] Confirmado: Spotify está reproduciendo ${currentTrackId}`);
       await db.ref(`/queue/${song.id}`).remove();
-      console.log(`[Sync] Canción eliminada de la cola: ${song.id}`);
       return NextResponse.json({ success: true, played: song });
     } else {
-      console.warn('[Sync] La canción no se está reproduciendo aún. No se elimina de la cola.');
       return NextResponse.json({ warning: 'Track not confirmed as playing', queued: song });
     }
 
   } catch (err: any) {
-    console.error('[Sync] Error inesperado:', err);
+    await logError(err.message || 'Unknown error in sync');
     return NextResponse.json({ error: `Internal error: ${err.message}` }, { status: 500 });
   }
 }

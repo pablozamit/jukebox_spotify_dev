@@ -505,6 +505,37 @@ export default function AdminPage() {
             <Button variant="outline" onClick={() => auth && signOut(auth)}>
               <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
             </Button>
+            <Button
+  variant="outline"
+  onClick={async () => {
+    try {
+      const res = await fetch('/api/spotify/sync', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: '🎵 Canción forzada',
+          description: `Ahora suena: ${json.played?.title || 'desconocida'}`,
+        });
+      } else {
+        toast({
+          title: '⚠️ No se forzó',
+          description: json.message || json.warning || json.error || 'Sin respuesta clara',
+          variant: 'destructive',
+        });
+      }
+    } catch (e: any) {
+      console.error('Error forzando sincronización:', e);
+      toast({
+        title: '❌ Error de red',
+        description: 'No se pudo conectar con el servidor',
+        variant: 'destructive',
+      });
+    }
+  }}
+>
+  🔁 Forzar sincronización
+</Button>
+
           </CardFooter>
         </Card>
       </div>

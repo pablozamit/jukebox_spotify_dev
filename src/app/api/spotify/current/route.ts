@@ -1,4 +1,3 @@
-// ➤ Fuerza este handler a ejecutarse en Node.js, no en Edge
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -9,66 +8,60 @@ import * as admin from 'firebase-admin';
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+    databaseURL: process.env.FIREBASE_DATABASE_URL,
   });
 }
 
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 
+async function getValidAccessToken(): Promise<string> {
+  const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
+  const tokens = snap.val() as
+    | { accessToken: string; refreshToken: string; expiresAt: number }
+    | null;
+
+  if (!tokens) throw new Error('No Spotify tokens found.');
+
+  const now = Date.now();
+  if (now < tokens.expiresAt) {
+    return tokens.accessToken;
+  }
+
+  // Token expirado → refrescar
+  const refreshRes = await axios.post(
+    'https://accounts.spotify.com/api/token',
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refreshToken,
+    }).toString(),
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
+      },
+    }
+  );
+
+  const newAccessToken = refreshRes.data.access_token;
+  const newExpiresAt = Date.now() + refreshRes.data.expires_in * 1000;
+
+  await admin
+    .database()
+    .ref('/admin/spotify/tokens')
+    .update({ accessToken: newAccessToken, expiresAt: newExpiresAt });
+
+  return newAccessToken;
+}
+
 export async function GET() {
   try {
-    // Obtener tokens desde la base de datos
-    const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
-    const tokens = snap.val() as
-      | { accessToken: string; refreshToken: string; expiresAt: number }
-      | null;
+    const accessToken = await getValidAccessToken();
 
-    if (!tokens) {
-      return NextResponse.json(
-        { error: 'No Spotify tokens found. Connect first.' },
-        { status: 400 }
-      );
-    }
-
-    let accessToken = tokens.accessToken;
-    const now = Date.now();
-
-    // Refrescar el token si ha expirado
-    if (now >= tokens.expiresAt) {
-      const resp = await axios.post(
-        'https://accounts.spotify.com/api/token',
-        new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: tokens.refreshToken,
-        }).toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Authorization:
-              'Basic ' +
-              Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
-          },
-        }
-      );
-
-      accessToken = resp.data.access_token;
-      const newExpiry = Date.now() + resp.data.expires_in * 1000;
-
-      await admin
-        .database()
-        .ref('/admin/spotify/tokens')
-        .update({ accessToken, expiresAt: newExpiry });
-    }
-
-    // Obtener pista actualmente sonando
-    const playerRes = await axios.get(
-      'https://api.spotify.com/v1/me/player/currently-playing',
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        validateStatus: () => true, // Permitir manejar manualmente códigos como 204
-      }
-    );
+    const playerRes = await axios.get('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+    });
 
     if (playerRes.status === 204 || !playerRes.data) {
       return NextResponse.json({ isPlaying: false });
@@ -80,7 +73,6 @@ export async function GET() {
       return NextResponse.json({ isPlaying: false });
     }
 
-    // Formatear y devolver los datos de la canción
     const track = {
       id: item.id,
       name: item.name,
@@ -90,12 +82,9 @@ export async function GET() {
       duration_ms: item.duration_ms,
     };
 
-    return NextResponse.json({
-      isPlaying: true,
-      track,
-    });
+    return NextResponse.json({ isPlaying: true, track });
   } catch (e: any) {
-    console.error('Error en /api/spotify/current:', e);
+    console.error('[Current] Error al obtener canción actual:', e?.message || e);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
