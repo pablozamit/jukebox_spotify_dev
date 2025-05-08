@@ -63,7 +63,13 @@ export default function AdminPage() {
   const [config, setConfig] = useState<SpotifyConfig>({ searchMode: 'all' });
   const [playlistIdInput, setPlaylistIdInput] = useState('');
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
-  const [isSpotifyConnected, setIsSpotifyConnected] = useState(false);
+  const [spotifyStatus, setSpotifyStatus] = useState<null | {
+    spotifyConnected: boolean;
+    tokensOk: boolean;
+    playbackAvailable: boolean;
+    message?: string;
+  }>(null);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<Song[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
@@ -155,17 +161,21 @@ export default function AdminPage() {
   }, [user, toast]);
 
   useEffect(() => {
-    const checkSpotify = async () => {
+    const checkStatus = async () => {
       try {
-        const res = await fetch('/api/spotify/current');
-        const data = await res.json();
-        setIsSpotifyConnected(!data.error);
-      } catch {
-        setIsSpotifyConnected(false);
+        const res = await fetch('/api/spotify/status');
+        const json = await res.json();
+        setSpotifyStatus(json);
+      } catch (e) {
+        console.error('Error al consultar estado de Spotify:', e);
+        setSpotifyStatus(null);
       }
     };
-    checkSpotify();
+    checkStatus();
+    const interval = setInterval(checkStatus, 10000); // cada 10s
+    return () => clearInterval(interval);
   }, []);
+  
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -224,12 +234,13 @@ export default function AdminPage() {
   };
 
   const handleSpotifyAction = async () => {
-    if (isSpotifyConnected) {
-      await fetch('/api/spotify/disconnect', { method: 'POST' });
-      setIsSpotifyConnected(false);
-    } else {
-      window.location.href = '/api/spotify/connect';
-    }
+    if (spotifyStatus?.spotifyConnected) {
+        await fetch('/api/spotify/disconnect', { method: 'POST' });
+        setSpotifyStatus(null);
+      } else {
+        window.location.href = '/api/spotify/connect';
+      }
+      
   };
 
   const handleAddSong = async (song: Song) => {
@@ -472,12 +483,19 @@ export default function AdminPage() {
               </div>
             )}
             <div className="flex justify-center">
-              <Button
-                onClick={handleSpotifyAction}
-                variant={isSpotifyConnected ? 'destructive' : 'outline'}
-              >
-                {isSpotifyConnected ? 'Desconectar Spotify' : 'Conectar Spotify'}
-              </Button>
+            <Button
+  onClick={handleSpotifyAction}
+  variant={
+    spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
+      ? 'default'           // verde: todo OK
+      : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
+      ? 'secondary'         // amarillo: conectado pero sin playback activo
+      : 'destructive'       // rojo: desconectado o fallido
+  }
+>
+  {spotifyStatus?.spotifyConnected ? 'Desconectar Spotify' : 'Conectar Spotify'}
+</Button>
+
             </div>
           </CardContent>
           <CardFooter className="flex justify-between">
