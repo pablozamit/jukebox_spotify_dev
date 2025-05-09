@@ -1,36 +1,42 @@
 /* eslint-disable object-curly-spacing, quote-props, max-len */
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import * as path from "path";
 import axios from "axios";
 import cors from "cors";
 
-const corsHandler = cors({ origin: true });
+// Ruta absoluta al archivo de credenciales
+const serviceAccountPath = path.join(__dirname, "../firebase-service-account.json");
 
 if (!admin.apps.length) {
-  admin.initializeApp();
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccountPath),
+    databaseURL: "https://barjukebox-default-rtdb.firebaseio.com",
+  });
 }
+
+const corsHandler = cors({ origin: true });
 
 export const searchSpotify = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
-    // Solo GET
     if (req.method !== "GET") {
       res.status(405).json({ error: "Method Not Allowed" });
       return;
     }
 
-    // Parámetro q
     const query = req.query.q as string;
     if (!query) {
       res.status(400).json({ error: "Missing parameter 'q'" });
       return;
     }
 
-    // 1) Obtener token de Spotify
+    // Spotify credentials desde funciones configuradas
     const cfg = functions.config().spotify;
     if (!cfg.client_id || !cfg.client_secret) {
       res.status(500).json({ error: "Spotify config missing" });
       return;
     }
+
     let accessToken: string;
     try {
       const tokenRes = await axios.post(
@@ -51,7 +57,7 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       return;
     }
 
-    // 2) Leer /config de Realtime Database
+    // Leer config de la base de datos
     const snap = await admin.database().ref("/config").once("value");
     const db = snap.val() || {};
     const mode = db.searchMode || "all";
@@ -59,7 +65,6 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
 
     let tracks: any[] = [];
 
-    // 3) Lógica de búsqueda
     try {
       if (mode === "playlist") {
         if (!pid) {
@@ -98,7 +103,6 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       return;
     }
 
-    // 4) Formatear y devolver
     const results = tracks.map((t: any) => ({
       id: t.id,
       name: t.name,
