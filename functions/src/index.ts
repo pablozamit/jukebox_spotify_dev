@@ -4,14 +4,19 @@ import * as admin from "firebase-admin";
 import * as path from "path";
 import axios from "axios";
 import cors from "cors";
+import * as fs from "fs";
 
 // Ruta absoluta al archivo de credenciales
 const serviceAccountPath = path.join(__dirname, "../firebase-service-account.json");
 
 if (!admin.apps.length) {
+  const serviceAccount = JSON.parse(
+    fs.readFileSync(serviceAccountPath, "utf8")
+  );
+
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
-    databaseURL: "https://barjukebox-default-rtdb.firebaseio.com",
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://barjukebox-default-rtdb.europe-west1.firebasedatabase.app",
   });
 }
 
@@ -30,9 +35,8 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       return;
     }
 
-    // Spotify credentials desde funciones configuradas
     const cfg = functions.config().spotify;
-    if (!cfg.client_id || !cfg.client_secret) {
+    if (!cfg?.client_id || !cfg?.client_secret) {
       res.status(500).json({ error: "Spotify config missing" });
       return;
     }
@@ -57,7 +61,6 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       return;
     }
 
-    // Leer config de la base de datos
     const snap = await admin.database().ref("/config").once("value");
     const db = snap.val() || {};
     const mode = db.searchMode || "all";
@@ -76,8 +79,7 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
           {
             headers: { Authorization: `Bearer ${accessToken}` },
             params: {
-              fields:
-                "items(track(id,name,artists(name),album(name),uri,preview_url))",
+              fields: "items(track(id,name,artists(name),album(name),uri,preview_url))",
               limit: 100,
             },
           }
