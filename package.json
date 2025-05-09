@@ -9,7 +9,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint || true",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "functions:build": "tsc --build functions",
+    "functions:deploy": "npm run functions:build && firebase deploy --only functions"
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.0.4",
