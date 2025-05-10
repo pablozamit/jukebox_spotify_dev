@@ -1,6 +1,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
+import { adminDb } from '@/lib/firebaseAdmin'; // Import adminDb from the shared file
 import axios from 'axios';
 import * as admin from 'firebase-admin';
 
@@ -11,9 +12,6 @@ if (!admin.apps.length) {
     databaseURL: process.env.FIREBASE_DATABASE_URL,
   });
 }
-
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 
 async function getValidAccessToken(): Promise<string> {
   const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
@@ -35,10 +33,10 @@ async function getValidAccessToken(): Promise<string> {
       grant_type: 'refresh_token',
       refresh_token: tokens.refreshToken,
     }).toString(),
-    {
+    { // Use environment variables directly
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
+        Authorization: `Basic ${Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
       },
     }
   );
@@ -55,6 +53,12 @@ async function getValidAccessToken(): Promise<string> {
 }
 
 export async function GET() {
+  console.log('Executing spotify/current route'); // Log at the beginning of the GET function
+
+  // Explicitly log adminDb for debugging
+  console.log('adminDb from firebaseAdmin.ts:', adminDb);
+
+
   try {
     const accessToken = await getValidAccessToken();
 
