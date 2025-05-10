@@ -164,18 +164,16 @@ export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (contex
       return;
     }
 
-    const currentTrack = playerState.trackId;
-    const isEnded =
-      !playerState.isPlaying ||
-      (currentTrack && currentTrack !== nextSong.spotifyTrackId);
+    const songEnded = !playerState.isPlaying ||
+                      (playerState.trackId !== nextSong.spotifyTrackId);
 
-    if (isEnded) {
+    if (songEnded) {
       console.log("⏭️ Intentando reproducir:", nextSong.title);
       await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
       await new Promise(res => setTimeout(res, 3000));
 
-      const newState = await getSpotifyPlayerState(accessToken);
-      if (newState.isPlaying && newState.trackId === nextSong.spotifyTrackId) {
+      const newPlayerState = await getSpotifyPlayerState(accessToken);
+      if (newPlayerState.isPlaying && newPlayerState.trackId === nextSong.spotifyTrackId) {
         console.log("✅ Confirmado: canción reproducida. Eliminando de la cola.");
         await db.ref(`/queue/${nextSong.id}`).remove();
       } else {
@@ -190,6 +188,7 @@ export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (contex
     console.error("🔥 Error en checkAndPlayNextTrack:", err.message || err);
   }
 });
+
 
 
 
