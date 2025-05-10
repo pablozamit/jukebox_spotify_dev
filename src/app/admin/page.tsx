@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { ref, onValue, remove, update, push, set, serverTimestamp } from 'firebase/database';
+import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
 import { auth, db, isDbValid } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import useSWR from 'swr';
@@ -17,9 +17,10 @@ import { Label } from '@/components/ui/label';
 
 import {
   ListMusic, Music, Trash2, ArrowUp, ArrowDown, Settings,
-  Search, Home, LogOut, AlertTriangle, RefreshCw, PlusCircle
+  Search, Home, LogOut, AlertTriangle, RefreshCw, PlusCircle, ExternalLink, ListVideo
 } from 'lucide-react';
 import Image from 'next/image';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 
 interface QueueSong {
@@ -30,6 +31,7 @@ interface QueueSong {
   albumArtUrl?: string;
   order?: number;
   addedByUserId?: string;
+  timestampAdded: number;
   votes?: number;
 }
 
@@ -45,6 +47,14 @@ interface SpotifyConfig {
   playlistId?: string;
   spotifyConnected?: boolean;
 }
+
+interface PlaylistDetails {
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  externalUrl?: string;
+}
+
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -68,14 +78,17 @@ export default function AdminPage() {
     tokensOk: boolean;
     playbackAvailable: boolean;
     message?: string;
+    activeDevice?: { id: string; name: string; type: string };
   }>(null);
-  
+  const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
+  const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
+
+
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<Song[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
 
-  // 🔊 SWR para canción actual
-  const { data: currentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 3000 });
+  const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 3000 });
 
   useEffect(() => {
     if (!auth) {
@@ -103,24 +116,28 @@ export default function AdminPage() {
         try {
           const data = snapshot.val() || {};
           const items = Object.entries(data)
-            .sort(([, a], [, b]) => ((a as any).order ?? 0) - ((b as any).order ?? 0))
             .map(([key, val]) => {
-                if (
-                  !val ||
-                  typeof val !== 'object' ||
-                  typeof (val as any).title !== 'string' ||
-                  typeof (val as any).artist !== 'string' ||
-                  typeof (val as any).spotifyTrackId !== 'string'
-                ) {
-                  return null;
-                }
-                return { id: key, ...(val as any) };
-              })
-              .filter((item): item is QueueSong => item !== null);
-              
-              
-          
-          if(items.length) setQueue(items as QueueSong[]);
+              if (
+                !val ||
+                typeof val !== 'object' ||
+                typeof (val as any).title !== 'string' ||
+                typeof (val as any).artist !== 'string' ||
+                typeof (val as any).spotifyTrackId !== 'string'
+              ) {
+                return null;
+              }
+              return {
+                id: key,
+                ...(val as any),
+                order: (val as any).order ?? (val as any).timestampAdded ?? 0,
+                timestampAdded: (val as any).timestampAdded ?? 0
+              };
+            })
+            .filter((item): item is QueueSong => item !== null)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+
+          setQueue(items);
         } catch (error) {
           console.error('Error processing queue data:', error);
           toast({ title: 'Error', description: 'Error al procesar la cola de reproducción.' });
@@ -145,7 +162,7 @@ export default function AdminPage() {
       const unsub = onValue(cfgRef, (snapshot) => {
         try {
           const data = snapshot.val() || { searchMode: 'all' };
-          setConfig({ searchMode: data.searchMode, playlistId: data.playlistId });
+          setConfig({ searchMode: data.searchMode, playlistId: data.playlistId, spotifyConnected: data.spotifyConnected });
           setPlaylistIdInput(data.playlistId || '');
         } catch (error) {
           console.error('Error processing config data:', error);
@@ -160,53 +177,119 @@ export default function AdminPage() {
     }
   }, [user, toast]);
 
+  // Fetch Playlist Details when config is loaded and in playlist mode
+  useEffect(() => {
+    if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
+      setPlaylistDetails(null);
+      setIsLoadingPlaylist(false);
+      return;
+    }
+
+    const fetchDetails = async () => {
+      setIsLoadingPlaylist(true);
+      try {
+        const res = await fetch(`/api/spotify/playlist-details?playlistId=${config.playlistId}`);
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || `Error ${res.status}`);
+        }
+        const data: PlaylistDetails = await res.json();
+        setPlaylistDetails(data);
+      } catch (error: any) {
+        console.error('Error fetching playlist details:', error);
+        setPlaylistDetails(null);
+        toast({
+          title: 'Error al Cargar Playlist',
+          description:
+            error.message === 'Playlist no encontrada'
+              ? 'La playlist configurada no existe o no es accesible.'
+              : 'No se pudo cargar la información de la playlist.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLoadingPlaylist(false);
+      }
+    };
+    fetchDetails();
+  }, [config, toast]);
+
+
   useEffect(() => {
     const checkStatus = async () => {
       try {
         const res = await fetch('/api/spotify/status');
         const json = await res.json();
         setSpotifyStatus(json);
+        if (db && json.spotifyConnected) {
+          update(ref(db, '/config'), { spotifyConnected: true });
+        } else if (db && !json.spotifyConnected) {
+          update(ref(db, '/config'), { spotifyConnected: false });
+        }
       } catch (e) {
         console.error('Error al consultar estado de Spotify:', e);
         setSpotifyStatus(null);
+        if (db) {
+          update(ref(db, '/config'), { spotifyConnected: false });
+        }
       }
     };
     checkStatus();
-    const interval = setInterval(checkStatus, 10000); // cada 10s
+    const interval = setInterval(checkStatus, 10000);
     return () => clearInterval(interval);
-  }, []);
-  
+  }, [db]);
+
 
   useEffect(() => {
+    let isSyncing = false;
     const interval = setInterval(async () => {
-      try {
-        const res = await fetch('/api/spotify/sync', { method: 'POST' });
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(errorText || 'Error al sincronizar');
+        if (isSyncing) return;
+        isSyncing = true;
+        try {
+            const res = await fetch('/api/spotify/sync', { method: 'POST' });
+            if (!res.ok) {
+                const errorText = await res.text();
+                console.warn('Sync API non-OK response:', errorText);
+                return;
+            }
+            const json = await res.json();
+            if (json.success || json.message === 'Playback in progress, skipping sync' || json.message === 'Queue is empty') {
+                // Expected outcomes, no toast needed unless action taken
+                if (json.played) {
+                     toast({
+                       title: '🎵 Reproducción automática',
+                       description: `Ahora suena: ${json.played.title}`,
+                     });
+                }
+            } else if (json.warning) {
+                console.warn("Sync warning:", json.warning, json.queued);
+            } else if (json.error) {
+                console.error("Sync error reported by API:", json.error);
+            }
+            mutateCurrentPlaying(); // Refresh current playing track
+        } catch (e: any) {
+            // Catch actual network errors or unparseable responses
+            console.error('Error en llamada a /api/spotify/sync:', e.message || e);
+        } finally {
+            isSyncing = false;
         }
-        const json = await res.json();        
-        if (json.action === 'started') {
-          toast({
-            title: '🎵 Reproducción iniciada',
-            description: `Ahora suena: ${json.track?.title}`,
-          });
-        }
-      } catch (e: any) {
-        console.error('Error en sincronización automática:', e.message);
-      }
-    }, 5000);
+    }, 8000); // Check every 8 seconds
 
     return () => clearInterval(interval);
-  }, [toast]);
+}, [toast, mutateCurrentPlaying]);
 
- const handleRemoveSong = async (songId: string) => {
-    console.log(songId);
+
+  const handleRemoveSong = async (songId: string) => {
     if (!db) return;
-    try{
-      await remove(ref(db, `/queue/${songId}`));
+    try {
+      const songRef = ref(db, `/queue/${songId}`);
+      const songSnapshot = await get(songRef);
+      if (!songSnapshot.exists()) {
+        toast({ title: 'Error', description: 'La canción no existe en la cola.', variant: 'destructive' });
+        return;
+      }
+      await remove(songRef);
       toast({ title: 'Canción eliminada', description: 'La canción ha sido eliminada de la cola.' });
-    }catch(e: any){
+    } catch (e: any) {
       console.error('Error eliminando canción:', e);
       toast({ title: 'Error', description: 'No se pudo eliminar la canción.', variant: 'destructive' });
     }
@@ -218,15 +301,16 @@ export default function AdminPage() {
     const target = index + direction;
     if (target < 0 || target >= newQueue.length) return;
     [newQueue[index], newQueue[target]] = [newQueue[target], newQueue[index]];
-    
+
     const updates: Record<string, any> = {};
     newQueue.forEach((song, i) => {
-      updates[`/queue/${song.id}/order`] = i * 1000;
+      updates[`/queue/${song.id}/order`] = i * 1000; // Simple order based on index
     });
-    
+
     try {
       await update(ref(db), updates);
-      setQueue(newQueue);
+      // setQueue(newQueue); // Firebase onValue will update the queue state
+      toast({ title: 'Orden actualizado', description: 'El orden de la canción ha cambiado.' });
     } catch (error) {
       console.error("Error updating queue order:", error);
       toast({ title: 'Error', description: 'Error al actualizar el orden de la cola.' });
@@ -235,16 +319,24 @@ export default function AdminPage() {
 
   const handleSpotifyAction = async () => {
     if (spotifyStatus?.spotifyConnected) {
+      try {
         await fetch('/api/spotify/disconnect', { method: 'POST' });
-        setSpotifyStatus(null);
-      } else {
-        window.location.href = '/api/spotify/connect';
+        setSpotifyStatus(prev => prev ? { ...prev, spotifyConnected: false, tokensOk: false, playbackAvailable: false } : null);
+        if (db) update(ref(db, '/config'), { spotifyConnected: false });
+        if (db) update(ref(db, '/admin/spotify/tokens'), null); // Clear tokens from DB
+        toast({ title: "Spotify Desconectado", description: "Se han borrado los tokens de Spotify." });
+      } catch (e) {
+        toast({ title: "Error", description: "No se pudo desconectar Spotify.", variant: "destructive" });
       }
-      
+    } else {
+      // The connect endpoint will handle the redirect and cookie setting
+      window.location.href = '/api/spotify/connect';
+    }
   };
 
+
   const handleAddSong = async (song: Song) => {
-    if (!db) return;
+    if (!db || !user) return;
 
     const exists = queue.some((q) => q.spotifyTrackId === song.spotifyTrackId);
     if (exists) {
@@ -258,19 +350,23 @@ export default function AdminPage() {
 
     const qRef = ref(db, '/queue');
     const newRef = push(qRef);
-    const maxOrder = Math.max(...queue.map((i) => i.order ?? 0), 0);
+    const maxOrder = queue.length > 0 ? Math.max(...queue.map((i) => i.order ?? 0)) : 0;
+
 
     await set(newRef, {
       ...song,
       timestampAdded: serverTimestamp(),
       order: maxOrder + 1000,
-      addedByUserId: user?.uid || 'admin',
+      addedByUserId: user?.uid || 'admin', // Mark as added by admin
+      albumArtUrl: song.albumArtUrl || null, // Ensure albumArtUrl is present or null
     });
 
     toast({
       title: 'Canción añadida',
-      description: song.title,
+      description: `${song.title} ha sido añadida a la cola por el admin.`,
     });
+    setSearchTerm(''); // Clear search after adding
+    setSearchResults([]);
   };
 
   const doSearch = useCallback(async () => {
@@ -290,9 +386,26 @@ export default function AdminPage() {
 
     setIsLoadingSearch(true);
     try {
-      const res = await fetch(`/api/searchSpotify?term=${encodeURIComponent(searchTerm)}&mode=${config.searchMode}&playlistId=${config.playlistId}`);
+      const params = new URLSearchParams({
+        q: searchTerm,
+        mode: config.searchMode,
+      });
+      if (config.searchMode === 'playlist' && config.playlistId) {
+        params.append('playlistId', config.playlistId);
+      }
+
+      const res = await fetch(`/api/searchSpotify?${params.toString()}`);
       const data = await res.json();
-      setSearchResults(data.results || []);
+      if (data.results && Array.isArray(data.results)) {
+        setSearchResults(data.results.map((t: any) => ({
+          spotifyTrackId: t.spotifyTrackId || t.id,
+          title: t.title || t.name,
+          artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+          albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+        })));
+      } else {
+        setSearchResults([]);
+      }
     } catch (e: any) {
       console.error('Error búsqueda Spotify:', e);
       toast({ title: 'Error', description: e.message });
@@ -302,18 +415,38 @@ export default function AdminPage() {
   }, [searchTerm, config, toast]);
 
   useEffect(() => {
-    const delay = setTimeout(() => doSearch(), 500);
+    const delay = setTimeout(() => {
+      if (searchTerm.trim()) { // Only search if searchTerm is not empty
+        doSearch();
+      } else {
+        setSearchResults([]); // Clear results if search term is empty
+      }
+    }, 500);
     return () => clearTimeout(delay);
   }, [searchTerm, doSearch]);
 
   const handleLoadAllSongs = async () => {
-    if (!config?.playlistId) return;
+    if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
+      toast({
+        title: 'Error de Configuración',
+        description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsLoadingSearch(true);
     try {
-      const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}`);
+      const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}&limit=100`); // Fetch up to 100 songs
       const data = await res.json();
-      if(data.results){
-        setSearchResults(data.results || []);
+      if (data.results && Array.isArray(data.results)) {
+        setSearchResults(data.results.map((t: any) => ({
+          spotifyTrackId: t.spotifyTrackId || t.id,
+          title: t.title || t.name,
+          artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+          albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+        })));
+      } else {
+        setSearchResults([]);
       }
     } catch (e: any) {
       toast({ title: 'Error al cargar', description: e.message });
@@ -322,128 +455,225 @@ export default function AdminPage() {
     }
   };
 
-  if (loadingAuth) {
-    return <div className="p-4">🔄 Cargando...</div>;
+  const handleConfigSave = async () => {
+    if (!db) return;
+    try {
+      await update(ref(db, '/config'), {
+        searchMode: config.searchMode,
+        playlistId: playlistIdInput.trim() || null, // Store null if empty
+      });
+      toast({ title: 'Configuración guardada', description: 'Los cambios se han guardado correctamente.' });
+    } catch (error) {
+      console.error("Error saving config:", error);
+      toast({ title: 'Error', description: 'No se pudo guardar la configuración.', variant: 'destructive' });
+    }
+  };
+
+
+  if (loadingAuth || isLoadingConfig) { // Show loading if either auth or initial config is loading
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Cargando panel de administración...</p>
+      </div>
+    );
   }
 
   if (!user) {
+    // This should ideally not be reached due to the redirect in the auth effect,
+    // but it's a good fallback.
     return null;
   }
 
   return (
-    <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6">
+    <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6 min-h-screen">
       {/* Columna principal */}
       <div className="flex-1 space-y-6">
 
         {/* ── Ahora Suena ── */}
-        <Card>
-          <CardHeader><CardTitle>Ahora Suena</CardTitle></CardHeader>
+        <Card className="shadow-lg rounded-lg border border-border/70">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+              <Music className="h-5 w-5" /> Ahora Suena
+            </CardTitle>
+          </CardHeader>
           <CardContent>
             {!currentPlaying ? (
-              <p className="text-muted-foreground">Cargando...</p>
+              <Skeleton className="h-16 w-full" />
             ) : currentPlaying.isPlaying && currentPlaying.track ? (
               <div className="flex gap-4 items-center">
                 <Image
-                  src={currentPlaying.track.albumArtUrl || '/placeholder.png'}
-                  alt="album"
+                  src={currentPlaying.track.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.track.id}/64`}
+                  alt={currentPlaying.track.name || 'Album art'}
+                  data-ai-hint="album cover"
                   width={64}
                   height={64}
-                  className="rounded shadow"
+                  className="rounded-md shadow-md"
                 />
-                <div className="flex-1">
+                <div className="flex-1 overflow-hidden">
                   <p className="font-semibold truncate ">{currentPlaying.track.name}</p>
                   <p className="text-sm text-muted-foreground truncate">{currentPlaying.track.artists.join(', ')}</p>
-                  <progress
-                    value={currentPlaying.track.progress_ms}
-                    max={currentPlaying.track.duration_ms}
-                    className="w-full h-1 mt-2 rounded bg-muted [&::-webkit-progress-value]:bg-primary"
-                  />
+                  {/* Progress bar removed as per request */}
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">Nada está sonando ahora mismo.</p>
+              <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
             )}
           </CardContent>
         </Card>
 
         {/* ── Lista de la Cola ── */}
-        <Card>
-          <CardHeader><CardTitle><ListMusic /> Cola de Reproducción</CardTitle></CardHeader>
+        <Card className="shadow-lg rounded-lg border border-border/70">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+              <ListMusic className="h-5 w-5" /> Cola de Reproducción ({queue.length})
+            </CardTitle>
+          </CardHeader>
           <CardContent className="p-0">
-            <ScrollArea className="h-80 p-4">
+            <ScrollArea className="h-96"> {/* Increased height */}
               {isLoadingQueue ? (
-                <p>Cargando cola...</p>
+                <div className="p-4 space-y-3">
+                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-md" />)}
+                </div>
               ) : queue.length > 0 ? (
-                queue.map((song, idx) => (
-                  <div key={song.id} className="flex items-center gap-3 p-2 hover:bg-secondary/30 rounded">
-                    <span className="w-5 text-sm text-muted-foreground">{idx + 1}</span>
-                    {song.albumArtUrl ? (
-                      <img src={song.albumArtUrl} alt={song.title} className="h-10 w-10 rounded object-cover" />
-                    ) : (
-                      <div className="h-10 w-10 bg-muted rounded flex items-center justify-center">
-                        <Music className="h-5 w-5 text-muted-foreground" />
+                <div className="divide-y divide-border">
+                  {queue.map((song, idx) => (
+                    <div key={song.id} className="flex items-center gap-3 p-3 hover:bg-secondary/20 transition-colors">
+                      <span className="w-5 text-sm text-center text-muted-foreground font-medium">{idx + 1}</span>
+                      {song.albumArtUrl ? (
+                        <Image src={song.albumArtUrl} alt={song.title} width={40} height={40} className="h-10 w-10 rounded object-cover shadow-sm" data-ai-hint="song album" />
+                      ) : (
+                        <div className="h-10 w-10 bg-muted rounded flex items-center justify-center shadow-sm">
+                          <Music className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex-1 overflow-hidden">
+                        <p className="truncate font-medium text-sm">{song.title}</p>
+                        <p className="truncate text-xs text-muted-foreground">{song.artist}</p>
+                        {/* <p className="text-xs text-muted-foreground">Votos: {song.votes ?? 0}</p> */}
                       </div>
-                    )}
-                    <div className="flex-1 overflow-hidden">
-                      <p className="truncate font-medium">{song.title}</p>
-                      <p className="truncate text-sm text-muted-foreground">{song.artist}</p>
-                      <p className="text-xs text-muted-foreground">Votos: {song.votes ?? 0}</p>
+                      <div className="flex gap-1.5">
+                        <TooltipProvider delayDuration={100}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Mover Arriba</p></TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}><ArrowDown /></Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Mover Abajo</p></TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => handleRemoveSong(song.id)}><Trash2 /></Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Eliminar Canción</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
                     </div>
-                    <div className="flex gap-1">
-                      <Button size="icon" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
-                      <Button size="icon" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}><ArrowDown /></Button>
-                      <Button size="icon" onClick={() => handleRemoveSong(song.id)}><Trash2 /></Button>
-                    </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               ) : (
-                <p className="text-center text-muted-foreground">La cola está vacía.</p>
+                <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
               )}
             </ScrollArea>
           </CardContent>
         </Card>
 
         {/* ── Buscador de canciones ── */}
-        <Card>
+        <Card className="shadow-lg rounded-lg border border-border/70">
           <CardHeader>
-            <CardTitle><Search className="inline-block mr-2" />Buscar Canciones</CardTitle>
+            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+              <Search className="h-5 w-5" />Añadir Canciones
+            </CardTitle>
+            {config.searchMode === 'playlist' && playlistDetails && (
+              <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
+                <ListVideo className="h-4 w-4" />
+                Playlist:
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a
+                        href={playlistDetails.externalUrl || '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium hover:underline truncate max-w-[200px]"
+                      >
+                        {playlistDetails.name}
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{playlistDetails.name}</p>
+                      {playlistDetails.description && <p className="text-xs text-muted-foreground">{playlistDetails.description}</p>}
+                       {playlistDetails.externalUrl && <p className="text-xs text-accent underline mt-1">Abrir en Spotify</p>}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
-            <div className="flex gap-2 mb-2">
+            <div className="flex gap-2 mb-4">
               <Input
-                placeholder="Nombre de canción o artista"
+                placeholder="Nombre de canción o artista..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-grow"
+                disabled={isLoadingSearch || (config.searchMode === 'playlist' && !config.playlistId)}
               />
-              <Button onClick={handleLoadAllSongs} disabled={isLoadingSearch}>
-                {isLoadingSearch ? <RefreshCw className="animate-spin h-4 w-4" /> : 'Ver Todas'}
-              </Button>
+              {config.searchMode === 'playlist' && config.playlistId && (
+                <Button onClick={handleLoadAllSongs} disabled={isLoadingSearch || !config.playlistId}>
+                  {isLoadingSearch && searchTerm === '' ? <RefreshCw className="animate-spin h-4 w-4" /> : <ListMusic className="h-4 w-4" />}
+                  <span className="ml-2 hidden sm:inline">Ver Todas</span>
+                </Button>
+              )}
             </div>
-            <ScrollArea className="h-64">
-              <div className="space-y-2">
-                {searchResults.map((song) => (
-                  <div
-                    key={song.spotifyTrackId}
-                    className="flex items-center justify-between p-2 rounded hover:bg-secondary/40"
-                  >
-                    <div className="flex items-center gap-3">
-                      {song.albumArtUrl ? (
-                        <img src={song.albumArtUrl} className="w-10 h-10 rounded" alt={song.title} />
-                      ) : (
-                        <div className="w-10 h-10 bg-muted flex items-center justify-center rounded">
-                          <Music className="text-muted-foreground" />
+            <ScrollArea className="h-72 border rounded-md"> {/* Increased height and added border */}
+              <div className="p-2 space-y-1">
+                {isLoadingSearch ? (
+                  [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)
+                ) : searchResults.length > 0 ? (
+                  searchResults.map((song) => (
+                    <div
+                      key={song.spotifyTrackId}
+                      className="flex items-center justify-between p-2 rounded-md hover:bg-secondary/20 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 overflow-hidden flex-1">
+                        {song.albumArtUrl ? (
+                          <Image src={song.albumArtUrl} width={32} height={32} className="w-8 h-8 rounded object-cover" alt={song.title} data-ai-hint="song album" />
+                        ) : (
+                          <div className="w-8 h-8 bg-muted flex items-center justify-center rounded">
+                            <Music className="text-muted-foreground h-4 w-4" />
+                          </div>
+                        )}
+                        <div className="truncate">
+                          <p className="font-medium text-sm truncate">{song.title}</p>
+                          <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
                         </div>
-                      )}
-                      <div className="truncate">
-                        <p className="font-medium text-sm truncate">{song.title}</p>
-                        <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
                       </div>
+                      <TooltipProvider delayDuration={100}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAddSong(song)} disabled={queue.some(s => s.spotifyTrackId === song.spotifyTrackId)}>
+                              <PlusCircle />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent><p>{queue.some(s => s.spotifyTrackId === song.spotifyTrackId) ? 'Ya en cola' : 'Añadir a la cola'}</p></TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => handleAddSong(song)}>
-                      <PlusCircle />
-                    </Button>
-                  </div>
-                ))}
+                  ))
+                ) : searchTerm ? (
+                  <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
+                ): (
+                   <p className="text-center text-sm text-muted-foreground py-4 italic">
+                     {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
+                   </p>
+                )}
               </div>
             </ScrollArea>
           </CardContent>
@@ -451,91 +681,132 @@ export default function AdminPage() {
       </div>
 
       {/* Columna lateral */}
-      <div className="w-full md:w-80">
-        <Card>
-          <CardHeader><CardTitle><Settings /> Configuración</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="search-mode"
-                checked={config.searchMode === 'playlist'}
-                onCheckedChange={(checked) => {
-                  if (!db) return;
-                  update(ref(db, '/config'), { searchMode: checked ? 'playlist' : 'all' });
-                }}
-              />
-              <Label htmlFor="search-mode">Buscar solo en playlist</Label>
+      <div className="w-full md:w-96 space-y-6"> {/* Increased width */}
+        <Card className="shadow-lg rounded-lg border border-border/70">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+              <Settings className="h-5 w-5" /> Configuración
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div>
+              <Label htmlFor="search-mode-toggle" className="text-base font-medium mb-2 block">Modo de Búsqueda</Label>
+              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
+                <Switch
+                  id="search-mode-toggle"
+                  checked={config.searchMode === 'playlist'}
+                  onCheckedChange={(checked) => {
+                    setConfig(prev => ({ ...prev, searchMode: checked ? 'playlist' : 'all' }));
+                  }}
+                  aria-label="Cambiar modo de búsqueda"
+                />
+                <Label htmlFor="search-mode-toggle" className="cursor-pointer flex-1">
+                  {config.searchMode === 'playlist' ? 'Solo en Playlist Especificada' : 'En todo Spotify'}
+                </Label>
+              </div>
             </div>
+
             {config.searchMode === 'playlist' && (
-              <div className="flex gap-2 items-end">
+              <div>
+                <Label htmlFor="playlist-id-input" className="text-base font-medium mb-2 block">ID de la Playlist de Spotify</Label>
                 <Input
+                  id="playlist-id-input"
+                  placeholder="Ej: 37i9dQZF1DXcBWIGoYBM5M"
                   value={playlistIdInput}
                   onChange={(e) => setPlaylistIdInput(e.target.value)}
+                  className="text-sm"
                 />
-                <Button
-                  onClick={() => {
-                    if (!db) return;
-                    update(ref(db, '/config'), { playlistId: playlistIdInput.trim() });
-                  }}
-                >
-                  Guardar
-                </Button>
+                <p className="text-xs text-muted-foreground mt-1">Pega el ID de la playlist de Spotify aquí.</p>
               </div>
             )}
-            <div className="flex justify-center">
-            <Button
-  onClick={handleSpotifyAction}
-  variant={
-    spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
-      ? 'default'           // verde: todo OK
-      : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
-      ? 'secondary'         // amarillo: conectado pero sin playback activo
-      : 'destructive'       // rojo: desconectado o fallido
-  }
->
-  {spotifyStatus?.spotifyConnected ? 'Desconectar Spotify' : 'Conectar Spotify'}
-</Button>
+            <Button onClick={handleConfigSave} className="w-full mt-2">
+              Guardar Configuración
+            </Button>
 
+            <hr className="my-4 border-border" />
+
+            <div>
+              <Label className="text-base font-medium mb-2 block">Conexión con Spotify</Label>
+              <Button
+                onClick={handleSpotifyAction}
+                variant={
+                  spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
+                    ? 'default'
+                    : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
+                      ? 'secondary'
+                      : 'destructive'
+                }
+                className="w-full"
+              >
+                {spotifyStatus?.spotifyConnected ? <><LogOut className="mr-2 h-4 w-4" /> Desconectar Spotify</> : <><ExternalLink className="mr-2 h-4 w-4" /> Conectar Spotify</>}
+              </Button>
+              {spotifyStatus && (
+                <div className="mt-2 text-xs space-y-0.5 p-2 border rounded-md bg-muted/30">
+                  <p>Conectado: {spotifyStatus.spotifyConnected ? 'Sí ✅' : 'No ❌'}</p>
+                  <p>Tokens válidos: {spotifyStatus.tokensOk ? 'Sí ✅' : 'No ❌'}</p>
+                  <p>Reproducción activa: {spotifyStatus.playbackAvailable ? `Sí en "${spotifyStatus.activeDevice?.name || 'dispositivo desconocido'}" ✅` : 'No ⚠️'}</p>
+                  {spotifyStatus.message && <p className="italic text-destructive/80">{spotifyStatus.message}</p>}
+                </div>
+              )}
             </div>
           </CardContent>
-          <CardFooter className="flex justify-between">
-            <Button variant="outline" onClick={() => router.push('/')}>
+         <CardFooter className="flex flex-col gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => router.push('/')} className="w-full">
               <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
             </Button>
-            <Button variant="outline" onClick={() => auth && signOut(auth)}>
+            <Button variant="outline" onClick={() => auth && signOut(auth)} className="w-full">
               <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
             </Button>
             <Button
-  variant="outline"
-  onClick={async () => {
-    try {
-      const res = await fetch('/api/spotify/sync', { method: 'POST' });
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: '🎵 Canción forzada',
-          description: `Ahora suena: ${json.played?.title || 'desconocida'}`,
-        });
-      } else {
-        toast({
-          title: '⚠️ No se forzó',
-          description: json.message || json.warning || json.error || 'Sin respuesta clara',
-          variant: 'destructive',
-        });
-      }
-    } catch (e: any) {
-      console.error('Error forzando sincronización:', e);
-      toast({
-        title: '❌ Error de red',
-        description: 'No se pudo conectar con el servidor',
-        variant: 'destructive',
-      });
-    }
-  }}
->
-  🔁 Forzar sincronización
-</Button>
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                if (!db) return;
+                const isConfirmed = window.confirm("¿Estás seguro de que quieres forzar la sincronización? Esto intentará reproducir la siguiente canción de la cola.");
+                if (!isConfirmed) return;
 
+                toast({ title: "⏳ Forzando sincronización...", description: "Intentando reproducir la siguiente canción." });
+                try {
+                  const res = await fetch('/api/spotify/sync', { method: 'POST' });
+                  const json = await res.json();
+                  if (json.success || json.played) {
+                    toast({
+                      title: '🎵 Sincronización Forzada Exitosa',
+                      description: `Ahora suena: ${json.played?.title || 'siguiente en cola'}.`,
+                    });
+                  } else if (json.message) {
+                     toast({
+                       title: 'ℹ️ Sincronización Forzada',
+                       description: json.message,
+                       variant: json.message === 'Queue is empty' ? 'default' : 'destructive',
+                     });
+                  } else if (json.warning) {
+                     toast({
+                       title: '⚠️ Advertencia Sincronización',
+                       description: json.warning,
+                       variant: 'default',
+                     });
+                  }
+                   else {
+                    toast({
+                      title: '⚠️ No se pudo forzar',
+                      description: json.error || 'Respuesta desconocida del servidor.',
+                      variant: 'destructive',
+                    });
+                  }
+                  mutateCurrentPlaying(); // Actualizar vista de "Ahora Suena"
+                } catch (e: any) {
+                  console.error('Error forzando sincronización:', e);
+                  toast({
+                    title: '❌ Error de Red',
+                    description: 'No se pudo conectar con el servidor para forzar la sincronización.',
+                    variant: 'destructive',
+                  });
+                }
+              }}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" /> Forzar Sincronización
+            </Button>
           </CardFooter>
         </Card>
       </div>
