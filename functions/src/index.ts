@@ -142,108 +142,56 @@ async function getSpotifyPlayerState(accessToken: string): Promise<any> {
   }
 }
 
-// Función para verificación frecuente
-async function frequentCheckAndPlay(accessToken: string, deviceId: string, db: admin.database.Database): Promise<void> {
-  let checkCount = 0;
-  const maxChecks = 30;
-  const checkInterval = 1500;
+// (Eliminado por completo. Esta función ya no es necesaria)
 
-  while (checkCount < maxChecks) {
-    await new Promise(resolve => setTimeout(resolve, checkInterval));
-    checkCount++;
-    console.log("Frequent check:", checkCount);
 
-    const playerState = await getSpotifyPlayerState(accessToken);
-
-    if (
-        (!playerState.isPlaying && (playerState.duration_ms - playerState.progress_ms) < 1000) ||
-        (playerState.isPlaying && playerState.trackId !== null && playerState.trackId !== (await getNextTrack(db))?.spotifyTrackId) ||
-        (!playerState.isPlaying && playerState.trackId === null)
-       )
-    {
-      console.log("Detected song end or playback stopped, attempting to play next.");
-      const nextSong = await getNextTrack(db);
-      if (nextSong) {
-        console.log("Queue not empty, attempting to play next song:", nextSong.title);
-        try {
-           await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
-           await new Promise(resolve => setTimeout(resolve, 3000));
-           const newPlayerState = await getSpotifyPlayerState(accessToken);
-           if(newPlayerState.isPlaying && newPlayerState.trackId === nextSong.spotifyTrackId){
-              console.log("New song confirmed playing, removing from queue.");
-              await db.ref(`/queue/${nextSong.id}`).remove();
-           } else {
-              console.warn("New song not confirmed playing after attempt.");
-           }
-        } catch (playError: any) {
-            console.error("Error attempting to play next track:", playError.message || playError);
-        }
-      } else {
-        console.log("Queue is empty, nothing to play.");
-      }
-      return;
-    } else if (playerState.isPlaying) {
-       console.log(`Frequent check: Song still playing, ${playerState.duration_ms - playerState.progress_ms}ms remaining.`);
-    } else {
-       console.log("Frequent check: Playback not active, waiting for queue or next trigger.");
-    }
-  }
-  console.log("Max frequent checks reached without detecting song end.");
-}
 
 // Cloud Function programada principal
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
 export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (context) => {
-
-  console.log("Running checkAndPlayNextTrack function...");
+  console.log("Running checkAndPlayNextTrack...");
   const db = admin.database();
 
   try {
     const accessToken = await getValidAccessToken();
     const deviceId = await getActiveDeviceId(accessToken);
     const playerState = await getSpotifyPlayerState(accessToken);
+    const nextSong = await getNextTrack(db);
 
-    if (playerState.isPlaying) {
-      const remainingTime = playerState.duration_ms - playerState.progress_ms;
-
-      if (remainingTime < 15000 && remainingTime > 0) {
-        console.log("Song ending soon, entering frequent check mode.");
-        await frequentCheckAndPlay(accessToken, deviceId, db);
-      } else {
-        console.log(`Song playing, time remaining: ${remainingTime}ms`);
-      }
-    } else if (!playerState.isPlaying && playerState.trackId === null) {
-      console.log("No active playback detected, checking queue to potentially start.");
-      const nextSong = await getNextTrack(db);
-      if (nextSong) {
-        console.log("Queue not empty, attempting to play first song:", nextSong.title);
-        try {
-            await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            const newPlayerState = await getSpotifyPlayerState(accessToken);
-            if(newPlayerState.isPlaying && newPlayerState.trackId === nextSong.spotifyTrackId){
-               console.log("First song confirmed playing, removing from queue.");
-               await db.ref(`/queue/${nextSong.id}`).remove();
-            } else {
-               console.warn("First song not confirmed playing after attempt.");
-            }
-        } catch (playError: any) {
-            console.error("Error attempting to play first track:", playError.message || playError);
-        }
-      } else {
-        console.log("Queue is empty, nothing to play.");
-      }
-    } else {
-        console.log("Playback not active, but track info present (possibly paused). Waiting.");
+    if (!nextSong) {
+      console.log("🛑 No hay canciones en la cola.");
+      return;
     }
 
-    console.log("checkAndPlayNextTrack function finished its cycle.");
+    const currentTrack = playerState.trackId;
+    const isEnded =
+      !playerState.isPlaying ||
+      (currentTrack && currentTrack !== nextSong.spotifyTrackId);
 
-  } catch (error: any) {
-    console.error("Error in checkAndPlayNextTrack main execution:", error.message || error);
+    if (isEnded) {
+      console.log("⏭️ Intentando reproducir:", nextSong.title);
+      await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
+      await new Promise(res => setTimeout(res, 3000));
+
+      const newState = await getSpotifyPlayerState(accessToken);
+      if (newState.isPlaying && newState.trackId === nextSong.spotifyTrackId) {
+        console.log("✅ Confirmado: canción reproducida. Eliminando de la cola.");
+        await db.ref(`/queue/${nextSong.id}`).remove();
+      } else {
+        console.warn("⚠️ No se pudo confirmar que la canción esté sonando.");
+      }
+    } else {
+      const remaining = playerState.duration_ms - playerState.progress_ms;
+      console.log(`🎵 Canción aún sonando (${remaining}ms restantes), sin acción.`);
+    }
+
+  } catch (err: any) {
+    console.error("🔥 Error en checkAndPlayNextTrack:", err.message || err);
   }
 });
+
+
 
 // Función existente de búsqueda en Spotify
 export const searchSpotify = functions.https.onRequest((req, res) => {
