@@ -14,6 +14,7 @@ if (!admin.apps.length) {
       throw new Error("Missing DATABASE_URL or GOOGLE_APPLICATION_CREDENTIALS_JSON.");
     }
 
+    console.log('Raw GOOGLE_APPLICATION_CREDENTIALS_JSON:', json);
     const serviceAccount = JSON.parse(json);
 
     admin.initializeApp({
@@ -21,6 +22,7 @@ if (!admin.apps.length) {
       databaseURL,
     });
 
+    console.log('Parsed service account:', serviceAccount);
     console.log('✅ Firebase Admin SDK initialized successfully (from src/lib/firebaseAdmin.ts)');
   } catch (error: any) {
     console.error("🔥 Firebase Admin SDK Initialization Error:", error.message, error.stack);
