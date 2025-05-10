@@ -128,11 +128,14 @@ export async function POST() {
     }
 
     await playTrack(accessToken, deviceId, song.spotifyTrackId);
-    await new Promise((res) => setTimeout(res, 1500));
+    // OMITIR pausa si estamos bajo tiempo limitado
+
 
     const playback = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 4000,
     });
+    
 
     const currentTrackId = playback.data?.item?.id;
     const isPlaying = playback.data?.is_playing;
@@ -146,6 +149,7 @@ export async function POST() {
 
   } catch (err: any) {
     await logError(err.message || 'Unknown error in sync');
-    return NextResponse.json({ error: `Internal error: ${err.message}` }, { status: 500 });
+    return NextResponse.json({ error: 'Error: ' + (err?.message || 'desconocido') }, { status: 500 });
+
   }
 }

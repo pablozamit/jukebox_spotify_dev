@@ -70,6 +70,7 @@ export async function GET() {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
+      timeout: 4000,
     });
 
     const isPlaying = test.data?.is_playing ?? false;
@@ -80,13 +81,15 @@ export async function GET() {
       playbackAvailable: isPlaying,
     });
 
-  } catch (err: any) {
-    console.error('[Status] Error:', err?.message || err);
+  } catch (e: unknown) {
+    const message = (e as any)?.message || 'Error desconocido';
+    console.error('[Status] Error:', message);
+
     return NextResponse.json({
       spotifyConnected: false,
       tokensOk: false,
       playbackAvailable: false,
-      reason: err?.message || 'Error desconocido',
+      reason: 'Error: ' + message,
     });
   }
 }

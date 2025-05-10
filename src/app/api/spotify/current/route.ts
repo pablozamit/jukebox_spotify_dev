@@ -60,7 +60,9 @@ export async function GET() {
 
     const playerRes = await axios.get('https://api.spotify.com/v1/me/player/currently-playing', {
       headers: { Authorization: `Bearer ${accessToken}` },
-      validateStatus: () => true,
+      timeout: 4000,
+validateStatus: () => true,
+
     });
 
     if (playerRes.status === 204 || !playerRes.data) {
