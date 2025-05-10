@@ -1,4 +1,6 @@
 // src/lib/firebaseAdmin.ts
+console.log('Executing firebaseAdmin.ts');
+
 import * as admin from 'firebase-admin';
 
 console.log('Firebase Admin Init: Starting initialization...');
