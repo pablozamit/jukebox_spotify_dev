@@ -152,7 +152,7 @@ export async function POST() {
     }
 
   } catch (err: any) {
-    await logError(err.message || 'Unknown error in sync');
+    await logError(err.response?.data || err.message || 'Unknown error in sync');
     return NextResponse.json({ error: 'Error: ' + (err?.message || 'desconocido') }, { status: 500 });
 
   }
