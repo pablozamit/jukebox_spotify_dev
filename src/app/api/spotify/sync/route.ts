@@ -63,17 +63,17 @@ async function getActiveDeviceId(accessToken: string): Promise<string> {
   return device.id;
 }
 
-async function checkShouldPlay(accessToken: string): Promise<boolean> {
+async function getPlaybackState(accessToken: string): Promise<any | null> {
   const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  const isPlaying = res.data?.is_playing;
-  const progress = res.data?.progress_ms;
-  const duration = res.data?.item?.duration_ms;
-  const remaining = duration - progress;
+  if (res.status === 204) { // No content, indicating no active playback
+    return null;
+  }
 
-  return !isPlaying || remaining < SAFETY_BUFFER_MS;
+  return res.data;
+
 }
 
 async function playTrack(accessToken: string, deviceId: string, trackId: string) {
@@ -122,43 +122,28 @@ export async function POST() {
     const accessToken = await refreshTokenIfNeeded(tokens);
     const deviceId = await getActiveDeviceId(accessToken);
 
-    const shouldPlay = await checkShouldPlay(accessToken);
-    if (!shouldPlay) {
-      return NextResponse.json({ message: 'Playback in progress, skipping sync' });
-    }
-
     const song = await getNextTrack(db);
     if (!song) {
       return NextResponse.json({ message: 'Queue is empty' });
     }
 
-    await playTrack(accessToken, deviceId, song.spotifyTrackId);
-    // OMITIR pausa si estamos bajo tiempo limitado
+    const playbackState = await getPlaybackState(accessToken);
 
+    const isPlaying = playbackState?.is_playing;
+    const currentTrackId = playbackState?.item?.id;
 
-    const playback = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      timeout: 4000,
-    });
-    
-
-    const currentPlayback = playback.data;
-    const isPlaying = currentPlayback?.is_playing;
-    const duration = currentPlayback?.item?.duration_ms;
-    const progress = currentPlayback?.progress_ms;
-    const remaining = (duration && progress) ? duration - progress : 0;
-
-    if (!isPlaying || remaining < SAFETY_BUFFER_MS) {
-      const nextSong = await getNextTrack(db);
-      if (nextSong) {
-        await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
-        await db.ref(`/queue/${nextSong.id}`).remove();
-        return NextResponse.json({ success: true, played: nextSong });
+    // If Spotify is not playing, or is playing a different song than the one at the top of the queue
+    if (!isPlaying || currentTrackId !== song?.spotifyTrackId) {
+      if (song) { // Ensure 'song' is not null
+        await playTrack(accessToken, deviceId, song.spotifyTrackId);
+        await db.ref(`/queue/${song.id}`).remove();
+        return NextResponse.json({ success: true, played: song });
       } else {
         return NextResponse.json({ message: 'Queue is empty' });
       }
-    } else if (isPlaying && currentPlayback?.item?.id === song?.spotifyTrackId) {
-      return NextResponse.json({ message: 'Playback in progress, skipping sync' });
+    } else {
+      // Spotify is playing the correct song, do nothing
+      return NextResponse.json({ message: 'Spotify is playing the correct track.' });
     }
   } catch (err: any) {
     await logError(err.response?.data || err.message || 'Unknown error in sync');
