@@ -92,6 +92,7 @@ async function getNextTrack(db: admin.database.Database): Promise<any | null> {
     id,
     ...val,
     order: val.order ?? val.timestampAdded ?? 0,
+    spotifyTrackId: val.spotifyTrackId ?? val.id,
   }));
 
   songs.sort((a, b) => a.order - b.order);
