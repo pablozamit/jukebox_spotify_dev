@@ -323,7 +323,8 @@ export default function AdminPage() {
         await fetch('/api/spotify/disconnect', { method: 'POST' });
         setSpotifyStatus(prev => prev ? { ...prev, spotifyConnected: false, tokensOk: false, playbackAvailable: false } : null);
         if (db) update(ref(db, '/config'), { spotifyConnected: false });
-        if (db) update(ref(db, '/admin/spotify/tokens'), null); // Clear tokens from DB
+        if (db) remove(ref(db, '/admin/spotify/tokens'))
+ // Clear tokens from DB
         toast({ title: "Spotify Desconectado", description: "Se han borrado los tokens de Spotify." });
       } catch (e) {
         toast({ title: "Error", description: "No se pudo desconectar Spotify.", variant: "destructive" });
@@ -374,7 +375,7 @@ export default function AdminPage() {
       setSearchResults([]);
       return;
     }
-
+  
     if (config.searchMode === 'playlist' && !config.playlistId) {
       toast({
         title: 'Playlist no configurada',
@@ -383,7 +384,7 @@ export default function AdminPage() {
       });
       return;
     }
-
+  
     setIsLoadingSearch(true);
     try {
       const params = new URLSearchParams({
@@ -393,19 +394,17 @@ export default function AdminPage() {
       if (config.searchMode === 'playlist' && config.playlistId) {
         params.append('playlistId', config.playlistId);
       }
-
+  
       const res = await fetch(`/api/searchSpotify?${params.toString()}`);
       const data = await res.json();
-      if (data.results && Array.isArray(data.results)) {
-        setSearchResults(data.results.map((t: any) => ({
-          spotifyTrackId: t.spotifyTrackId || t.id,
-          title: t.title || t.name,
-          artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-          albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-        })));
-      } else {
-        setSearchResults([]);
-      }
+      const results = Array.isArray(data.results) ? data.results : [];
+      const songs: Song[] = results.map((t: any) => ({
+        spotifyTrackId: t.spotifyTrackId || t.id,
+        title: t.title || t.name,
+        artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+        albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+      }));
+      setSearchResults(songs);
     } catch (e: any) {
       console.error('Error búsqueda Spotify:', e);
       toast({ title: 'Error', description: e.message });
@@ -413,6 +412,7 @@ export default function AdminPage() {
       setIsLoadingSearch(false);
     }
   }, [searchTerm, config, toast]);
+  
 
   useEffect(() => {
     const delay = setTimeout(() => {
@@ -436,24 +436,23 @@ export default function AdminPage() {
     }
     setIsLoadingSearch(true);
     try {
-      const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}&limit=100`); // Fetch up to 100 songs
+      const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}&limit=100`);
       const data = await res.json();
-      if (data.results && Array.isArray(data.results)) {
-        setSearchResults(data.results.map((t: any) => ({
-          spotifyTrackId: t.spotifyTrackId || t.id,
-          title: t.title || t.name,
-          artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-          albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-        })));
-      } else {
-        setSearchResults([]);
-      }
+      const results = Array.isArray(data.results) ? data.results : [];
+      const songs: Song[] = results.map((t: any) => ({
+        spotifyTrackId: t.spotifyTrackId || t.id,
+        title: t.title || t.name,
+        artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+        albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+      }));
+      setSearchResults(songs);
     } catch (e: any) {
       toast({ title: 'Error al cargar', description: e.message });
     } finally {
       setIsLoadingSearch(false);
     }
   };
+  
 
   const handleConfigSave = async () => {
     if (!db) return;

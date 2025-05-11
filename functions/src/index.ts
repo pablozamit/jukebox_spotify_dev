@@ -189,68 +189,78 @@ export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (contex
 // Función de búsqueda en Spotify (sustituida)
 export const searchSpotify = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
-    if (req.method !== "GET") {
-      res.status(405).json({ error: "Method Not Allowed" });
-      return;
-    }
-
-    const query = req.query.q as string;
-    if (!query) {
-      res.status(400).json({ error: "Missing parameter 'q'" });
-      return;
-    }
-
-    const credsPath = path.join(__dirname, "../spotify-credentials.json");
-    const creds = JSON.parse(fs.readFileSync(credsPath, "utf8"));
-    const clientId = creds.client_id;
-    const clientSecret = creds.client_secret;
-
-    let accessToken: string;
     try {
-      const tokenRes = await axios.post(
-        "https://accounts.spotify.com/api/token",
-        new URLSearchParams({ grant_type: "client_credentials" }).toString(),
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-          },
-        }
-      );
-      accessToken = tokenRes.data.access_token;
-    } catch (err) {
-      res.status(500).json({ error: "Failed to get Spotify token" });
-      return;
-    }
-
-    let tracks: any[] = [];
-
-    try {
-      const srRes = await axios.get("https://api.spotify.com/v1/search", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        params: { q: query, type: "track", limit: 20 },
-      });
-
-      if (!srRes.data?.tracks?.items) {
-        res.status(404).json({ error: "No tracks found" });
+      if (req.method !== "GET") {
+        res.status(405).json({ error: "Method Not Allowed" });
         return;
       }
 
-      tracks = srRes.data.tracks.items;
-    } catch (err) {
-      res.status(500).json({ error: "Error fetching from Spotify API" });
-      return;
+      const query = req.query.q as string;
+      if (!query) {
+        res.status(400).json({ error: "Missing parameter 'q'" });
+        return;
+      }
+
+      const accessToken = await getValidAccessToken();
+      const snap = await admin.database().ref("/config").once("value");
+      const config = snap.val() || {};
+      const mode = config.searchMode || "all";
+      const playlistId = config.playlistId as string;
+
+      let tracks: any[] = [];
+
+      if (mode === "playlist") {
+        if (!playlistId) {
+          res.status(400).json({ error: "Playlist ID not configured" });
+          return;
+        }
+
+        const response = await axios.get(
+          `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            params: {
+              fields: "items(track(id,name,artists(name),album(name),uri,preview_url))",
+              limit: 100,
+            },
+          }
+        );
+
+        const qLower = query.toLowerCase();
+        tracks = (response.data.items || [])
+          .map((i: any) => i.track)
+          .filter((t: any) =>
+            t.name.toLowerCase().includes(qLower) ||
+            t.artists.some((a: any) => a.name.toLowerCase().includes(qLower))
+          );
+      } else {
+        const response = await axios.get("https://api.spotify.com/v1/search", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: { q: query, type: "track", limit: 20 },
+        });
+
+        tracks = response.data?.tracks?.items || [];
+      }
+
+      if (!Array.isArray(tracks)) {
+        console.warn("⚠️ La respuesta no es un array, forzando array vacío.");
+        tracks = [];
+      }
+
+      const results = tracks.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        artists: t.artists.map((a: any) => a.name),
+        album: t.album.name,
+        uri: t.uri,
+        preview_url: t.preview_url,
+      }));
+
+      res.status(200).json({ results });
+
+    } catch (err: any) {
+      console.error("❌ Error en searchSpotify:", err.message || err);
+      res.status(500).json({ error: err.message || "Internal Server Error" });
     }
-
-    const results = tracks.map((t: any) => ({
-      id: t.id,
-      name: t.name,
-      artists: t.artists.map((a: any) => a.name),
-      album: t.album.name,
-      uri: t.uri,
-      preview_url: t.preview_url,
-    }));
-
-    res.status(200).json({ results });
   });
 });

@@ -39,7 +39,6 @@ async function refreshTokenIfNeeded(tokens: any): Promise<string> {
   const expiresIn = res.data.expires_in * 1000;
   const expiresAt = now + expiresIn;
 
-  // Guardamos nuevo token
   const db = getFirebaseApp().database();
   await db.ref('/admin/spotify/tokens').update({
     accessToken: newAccessToken,
@@ -55,41 +54,47 @@ export async function GET() {
     const snapshot = await db.ref('/admin/spotify/tokens').once('value');
     const tokens = snapshot.val();
 
-    if (!tokens || !tokens.refreshToken) {
+    if (!tokens?.refreshToken) {
       return NextResponse.json({
         spotifyConnected: false,
         tokensOk: false,
         playbackAvailable: false,
-        reason: 'No hay tokens guardados.',
+        message: 'No hay tokens guardados.',
       });
     }
 
     const accessToken = await refreshTokenIfNeeded(tokens);
 
     const test = await axios.get(`${SPOTIFY_BASE_URL}/me/player`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      headers: { Authorization: `Bearer ${accessToken}` },
       timeout: 4000,
     });
 
-    const isPlaying = test.data?.is_playing ?? false;
+    const data = test.data || {};
+    const activeDevice = Array.isArray(data.devices)
+      ? data.devices.find((d: any) => d.is_active)
+      : data.device;
 
     return NextResponse.json({
       spotifyConnected: true,
       tokensOk: true,
-      playbackAvailable: isPlaying,
+      playbackAvailable: data.is_playing ?? false,
+      activeDevice: activeDevice
+        ? {
+            id: activeDevice.id,
+            name: activeDevice.name,
+            type: activeDevice.type,
+          }
+        : null,
+      message: 'Estado verificado correctamente.',
     });
-
-  } catch (e: unknown) {
-    const message = (e as any)?.message || 'Error desconocido';
-    console.error('[Status] Error:', message);
-
+  } catch (e: any) {
+    console.error('[Status] Error:', e?.message || e);
     return NextResponse.json({
       spotifyConnected: false,
       tokensOk: false,
       playbackAvailable: false,
-      reason: 'Error: ' + message,
+      message: 'Error: ' + (e?.message || 'desconocido'),
     });
   }
 }

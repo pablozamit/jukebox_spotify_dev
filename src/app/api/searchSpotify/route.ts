@@ -97,10 +97,10 @@ export async function GET(request: Request) {
     const results = tracks.map(t => ({
       spotifyTrackId: t.id,
       title: t.name,
-      artist: t.artists?.[0]?.name ?? '',
+ artist: Array.isArray(t.artists) && t.artists.length > 0 ? t.artists.map(a => a.name).join(', ') : '',
       album: {
         name: t.album?.name ?? "",
-        images: t.album?.images,
+ images: Array.isArray(t.album?.images) ? t.album.images : [],
       },
       uri: t.uri,
       preview_url: t.preview_url,
