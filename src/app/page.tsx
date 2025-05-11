@@ -511,6 +511,7 @@ useEffect(() => {
 
             while (hasMore) {
                 const url = `/api/searchSpotify?mode=playlist&playlistId=${spotifyConfig.playlistId}&offset=${offset}&limit=${limit}`;
+                console.log('Fetching playlist tracks with URL:', url);
                 const res = await fetch(url);
 
                 if (!res.ok) {
@@ -518,8 +519,14 @@ useEffect(() => {
                     throw new Error(errorData.error || `Error ${res.status}`);
                 }
 
+                console.log('API Response object:', res);
                 const data = await res.json();
+                console.log('API Response data:', data);
+
                 if (!data.results || !Array.isArray(data.results)) {
+                    // Add logging for debugging
+                    console.error('data.results is undefined!', data);
+
                     console.warn('Spotify API did not return expected "results" array:', data);
                     hasMore = false; // Stop fetching if no results are returned
                     break;
