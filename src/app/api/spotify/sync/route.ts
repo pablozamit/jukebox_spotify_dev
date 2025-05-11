@@ -132,11 +132,17 @@ export async function POST() {
     const isPlaying = playbackState?.is_playing;
     const currentTrackId = playbackState?.item?.id;
 
-    // If Spotify is not playing, or is playing a different song than the one at the top of the queue
-    if (!isPlaying || currentTrackId !== song?.spotifyTrackId) {
+    // Calculate time remaining of the current track in milliseconds
+    const progressMs = playbackState?.progress_ms || 0;
+    const durationMs = playbackState?.item?.duration_ms || 0;
+    const timeRemainingMs = durationMs - progressMs;
+
+    // If Spotify is not playing, or is playing a different song than the one at the top of the queue,
+    // OR if the current song is the correct one but is nearing its end (less than SAFETY_BUFFER_MS remaining)
+    if (!isPlaying || currentTrackId !== song?.spotifyTrackId || (currentTrackId === song?.spotifyTrackId && timeRemainingMs < SAFETY_BUFFER_MS)) {
       if (song) { // Ensure 'song' is not null
         await playTrack(accessToken, deviceId, song.spotifyTrackId);
-        await db.ref(`/queue/${song.id}`).remove();
+        if (currentTrackId === song?.spotifyTrackId) await db.ref(`/queue/${song.id}`).remove(); // Only remove if we were playing the correct track
         return NextResponse.json({ success: true, played: song });
       } else {
         return NextResponse.json({ message: 'Queue is empty' });
