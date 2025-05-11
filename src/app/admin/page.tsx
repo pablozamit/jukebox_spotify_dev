@@ -468,6 +468,26 @@ export default function AdminPage() {
     }
   };
 
+  const handleClearQueue = async () => {
+    if (!db) return;
+    const isConfirmed = window.confirm("¿Estás seguro de que quieres vaciar completamente la cola? Esta acción no se puede deshacer.");
+    if (!isConfirmed) return;
+
+    setIsLoadingQueue(true); // Indicate loading while clearing
+    try {
+      const queueRef = ref(db, '/queue');
+      await remove(queueRef);
+      toast({
+        title: 'Cola Vaciada',
+        description: 'Se ha eliminado toda la cola de reproducción.',
+      });
+    } catch (error: any) {
+      console.error('Error clearing queue:', error);
+      toast({ title: 'Error', description: 'No se pudo vaciar la cola.', variant: 'destructive' });
+    } finally {
+      setIsLoadingQueue(false); // Stop loading indicator
+    }
+  };
 
   if (loadingAuth || isLoadingConfig) { // Show loading if either auth or initial config is loading
     return (
@@ -577,7 +597,9 @@ export default function AdminPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
+                <div className="p-4">
+                 <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
+                </div>
               )}
             </ScrollArea>
           </CardContent>
@@ -805,6 +827,15 @@ export default function AdminPage() {
               }}
             >
               <RefreshCw className="mr-2 h-4 w-4" /> Forzar Sincronización
+            </Button>
+            <Button
+              variant="destructive"
+              className="w-full"
+              onClick={handleClearQueue}
+              disabled={queue.length === 0 || isLoadingQueue}
+            >
+              {isLoadingQueue ? <RefreshCw className="animate-spin mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Vaciar Cola ({queue.length})
             </Button>
           </CardFooter>
         </Card>
