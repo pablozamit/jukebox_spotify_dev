@@ -12,10 +12,14 @@ const httpClient = axios.create({ timeout: SPOTIFY_API_TIMEOUT });
 
 const getFirebaseApp = () => {
   if (!admin.apps.length) {
+    const raw = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!);
     admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
+      credential: admin.credential.cert(raw),
       databaseURL: process.env.FIREBASE_DATABASE_URL,
     });
+
+  }
+  if (!admin.apps.length) {
   }
   return admin.app();
 };

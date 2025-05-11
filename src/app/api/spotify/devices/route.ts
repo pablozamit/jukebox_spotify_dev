@@ -5,9 +5,10 @@ import axios from 'axios';
 import * as admin from 'firebase-admin';
 
 if (!admin.apps.length) {
+  const raw = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!);
   admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+    credential: admin.credential.cert(raw),
+    databaseURL: process.env.FIREBASE_DATABASE_URL,
   });
 }
 

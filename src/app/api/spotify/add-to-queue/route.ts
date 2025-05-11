@@ -8,8 +8,10 @@ import * as admin from 'firebase-admin';
 // Inicializa Admin SDK si no está activo
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+    credential: admin.credential.cert(
+      JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!)
+    ),
+    databaseURL: process.env.FIREBASE_DATABASE_URL,
   });
 }
 

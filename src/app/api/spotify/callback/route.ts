@@ -8,8 +8,9 @@ import axios from 'axios';
 try {
   if (!admin.apps.length) {
     console.log('[Firebase] Inicializando Admin SDK...');
+    const raw = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!);
     admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
+ credential: admin.credential.cert(raw),
       databaseURL: process.env.FIREBASE_DATABASE_URL,
     });
     console.log('[Firebase] Admin SDK inicializado.');
