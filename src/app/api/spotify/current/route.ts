@@ -3,19 +3,13 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebaseAdmin'; // Import adminDb from the shared file
 import axios from 'axios';
-import * as admin from 'firebase-admin';
 
-// Inicializar Admin SDK si no está ya inicializado
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    databaseURL: process.env.FIREBASE_DATABASE_URL,
-  });
-}
 
 async function getValidAccessToken(): Promise<string> {
-  const snap = await admin.database().ref('/admin/spotify/tokens').once('value');
-  const tokens = snap.val() as
+  const snap = await adminDb?.ref('/admin/spotify/tokens').once('value');
+if (!snap) throw new Error('No snapshot returned from Firebase.');
+const tokens = snap.val() as
+
     | { accessToken: string; refreshToken: string; expiresAt: number }
     | null;
 
@@ -44,10 +38,11 @@ async function getValidAccessToken(): Promise<string> {
   const newAccessToken = refreshRes.data.access_token;
   const newExpiresAt = Date.now() + refreshRes.data.expires_in * 1000;
 
-  await admin
-    .database()
-    .ref('/admin/spotify/tokens')
-    .update({ accessToken: newAccessToken, expiresAt: newExpiresAt });
+  await adminDb?.ref('/admin/spotify/tokens').update({
+    accessToken: newAccessToken,
+    expiresAt: newExpiresAt,
+  });
+  
 
   return newAccessToken;
 }
@@ -74,21 +69,23 @@ validateStatus: () => true,
     }
 
     const data = playerRes.data;
-    const item = data.item;
-    if (!item) {
+    const item = data?.item;
+
+    if (!data || !item) {
       return NextResponse.json({ isPlaying: false });
     }
 
     const track = {
-      id: item.id,
-      name: item.name,
-      artists: item.artists.map((a: any) => a.name),
+      id: item.id ?? null,
+      name: item.name ?? '',
+      artists: item.artists?.map((a: any) => a.name) ?? [],
       albumArtUrl: item.album?.images?.[0]?.url ?? null,
-      progress_ms: data.progress_ms,
-      duration_ms: item.duration_ms,
+      progress_ms: data.progress_ms ?? 0,
+      duration_ms: item.duration_ms ?? 0,
     };
 
-    return NextResponse.json({ isPlaying: true, track });
+    return NextResponse.json({ isPlaying: data.is_playing, track });
+
   } catch (e: any) {
     console.error('[Current] Error al obtener canción actual:', e?.message || e);
     return NextResponse.json(

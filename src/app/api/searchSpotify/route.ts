@@ -90,7 +90,8 @@ export async function GET(request: Request) {
           params: { q, type: 'track', limit: 20 },
         }
       );
-      tracks = srRes.data.tracks?.items ?? [];
+      tracks = Array.isArray(srRes.data?.tracks?.items) ? srRes.data.tracks.items : [];
+
     }
 
     const results = tracks.map(t => ({

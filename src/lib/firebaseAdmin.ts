@@ -17,14 +17,17 @@ if (!admin.apps.length) {
     }
 
     console.log('Raw GOOGLE_APPLICATION_CREDENTIALS_JSON:', json);
-    const serviceAccount = JSON.parse(json);
+    const raw = JSON.parse(json);
+raw.private_key = raw.private_key.replace(/\\n/g, '\n');
 
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      databaseURL,
-    });
+admin.initializeApp({
+  credential: admin.credential.cert(raw),
+  databaseURL,
+});
 
-    console.log('Parsed service account:', serviceAccount);
+
+console.log('Parsed service account:', raw);
+
     console.log('✅ Firebase Admin SDK initialized successfully (from src/lib/firebaseAdmin.ts)');
   } catch (error: any) {
     console.error("🔥 Firebase Admin SDK Initialization Error:", error.message, error.stack);

@@ -38,10 +38,11 @@ async function getValidAccessToken(): Promise<string> {
 
   if (!tokens.expiresAt || now >= tokens.expiresAt - 60000) {
     console.log('Spotify access token expired or expiring soon, refreshing...');
-    const cfg = functions.config().spotify;
-    if (!cfg?.client_id || !cfg?.client_secret) {
-      throw new Error('Spotify client credentials not configured in Firebase functions.');
-    }
+    const spotifySecrets = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "../spotify-credentials.json"), "utf8")
+    );
+    const clientId = spotifySecrets.client_id;
+    const clientSecret = spotifySecrets.client_secret;
 
     const refreshRes = await axios.post(
       'https://accounts.spotify.com/api/token',
@@ -52,7 +53,7 @@ async function getValidAccessToken(): Promise<string> {
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': 'Basic ' + Buffer.from(`${cfg.client_id}:${cfg.client_secret}`).toString('base64'),
+          'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
         },
       }
     );
@@ -134,17 +135,13 @@ async function getSpotifyPlayerState(accessToken: string): Promise<any> {
 
   } catch (error: any) {
     if (error.response?.status === 404) {
-       console.log("Spotify player state: No active device or player not found.");
-       return { isPlaying: false, progress_ms: 0, duration_ms: 0, trackId: null };
+      console.log("Spotify player state: No active device or player not found.");
+      return { isPlaying: false, progress_ms: 0, duration_ms: 0, trackId: null };
     }
     console.error("Error getting Spotify player state:", error.message || error);
     throw error;
   }
 }
-
-// (Eliminado por completo. Esta función ya no es necesaria)
-
-
 
 // Cloud Function programada principal
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -189,10 +186,7 @@ export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (contex
   }
 });
 
-
-
-
-// Función existente de búsqueda en Spotify
+// Función de búsqueda en Spotify (sustituida)
 export const searchSpotify = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== "GET") {
@@ -206,11 +200,10 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const cfg = functions.config().spotify;
-    if (!cfg?.client_id || !cfg?.client_secret) {
-      res.status(500).json({ error: "Spotify config missing" });
-      return;
-    }
+    const credsPath = path.join(__dirname, "../spotify-credentials.json");
+    const creds = JSON.parse(fs.readFileSync(credsPath, "utf8"));
+    const clientId = creds.client_id;
+    const clientSecret = creds.client_secret;
 
     let accessToken: string;
     try {
@@ -220,9 +213,7 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
         {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            Authorization: `Basic ${Buffer.from(
-              `${cfg.client_id}:${cfg.client_secret}`
-            ).toString("base64")}`,
+            "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
           },
         }
       );
@@ -232,45 +223,20 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const snap = await admin.database().ref("/config").once("value");
-    const db = snap.val() || {};
-    const mode = db.searchMode || "all";
-    const pid = db.playlistId as string;
-
     let tracks: any[] = [];
 
     try {
-      if (mode === "playlist") {
-        if (!pid) {
-          res.status(400).json({ error: "Playlist ID not configured" });
-          return;
-        }
-        const plRes = await axios.get(
-          `https://api.spotify.com/v1/playlists/${pid}/tracks`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            params: {
-              fields: "items(track(id,name,artists(name),album(name),uri,preview_url))",
-              limit: 100,
-            },
-          }
-        );
-        const ql = query.toLowerCase();
-        tracks = (plRes.data.items || [])
-          .map((i: any) => i.track)
-          .filter((t: any) => {
-            return (
-              t.name.toLowerCase().includes(ql) ||
-              t.artists.some((a: any) => a.name.toLowerCase().includes(ql))
-            );
-          });
-      } else {
-        const srRes = await axios.get("https://api.spotify.com/v1/search", {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          params: { q: query, type: "track", limit: 20 },
-        });
-        tracks = srRes.data.tracks.items || [];
+      const srRes = await axios.get("https://api.spotify.com/v1/search", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { q: query, type: "track", limit: 20 },
+      });
+
+      if (!srRes.data?.tracks?.items) {
+        res.status(404).json({ error: "No tracks found" });
+        return;
       }
+
+      tracks = srRes.data.tracks.items;
     } catch (err) {
       res.status(500).json({ error: "Error fetching from Spotify API" });
       return;
