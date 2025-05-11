@@ -388,6 +388,7 @@ export default function ClientPage() {
     setIsLoadingSearch(true);
     try {
       const res = await searchSpotify(searchTerm, spotifyConfig);
+      console.log('Raw search response:', res);
       console.log('Search results data:', res);
       setSearchResults(res);
     } catch (e: any) {
