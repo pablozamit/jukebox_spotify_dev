@@ -142,16 +142,24 @@ export async function POST() {
     });
     
 
-    const currentTrackId = playback.data?.item?.id;
-    const isPlaying = playback.data?.is_playing;
+    const currentPlayback = playback.data;
+    const isPlaying = currentPlayback?.is_playing;
+    const duration = currentPlayback?.item?.duration_ms;
+    const progress = currentPlayback?.progress_ms;
+    const remaining = (duration && progress) ? duration - progress : 0;
 
-    if (isPlaying && currentTrackId === song.spotifyTrackId) {
-      await db.ref(`/queue/${song.id}`).remove();
-      return NextResponse.json({ success: true, played: song });
-    } else {
-      return NextResponse.json({ warning: 'Track not confirmed as playing', queued: song });
+    if (!isPlaying || remaining < SAFETY_BUFFER_MS) {
+      const nextSong = await getNextTrack(db);
+      if (nextSong) {
+        await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
+        await db.ref(`/queue/${nextSong.id}`).remove();
+        return NextResponse.json({ success: true, played: nextSong });
+      } else {
+        return NextResponse.json({ message: 'Queue is empty' });
+      }
+    } else if (isPlaying && currentPlayback?.item?.id === song?.spotifyTrackId) {
+      return NextResponse.json({ message: 'Playback in progress, skipping sync' });
     }
-
   } catch (err: any) {
     await logError(err.response?.data || err.message || 'Unknown error in sync');
     return NextResponse.json({ error: 'Error: ' + (err?.message || 'desconocido') }, { status: 500 });
