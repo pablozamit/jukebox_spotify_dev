@@ -523,13 +523,13 @@ useEffect(() => {
                 const data = await res.json();
                 console.log('API Response data:', data);
 
-                if (!data.results || !Array.isArray(data.results)) {
+                if (!data.items || !Array.isArray(data.items)) {
                     // Add logging for debugging
                     console.error('data.results is undefined!', data);
 
                     console.warn('Spotify API did not return expected "results" array:', data);
                     hasMore = false; // Stop fetching if no results are returned
-                    break;
+ break;
                 }
 
                 const tracks: Song[] = (data.results as any[]).map((t) => ({
@@ -538,10 +538,19 @@ useEffect(() => {
                     artist: t.artists.map((a: any) => a.name).join(', '),
                     albumArtUrl: t.album?.images?.[0]?.url ?? null,
                 }));
+ (data.items as any[]).map((item) => {
+ const t = item.track;
+ return ({
+ spotifyTrackId: t.id,
+ title: t.name,
+ artist: t.artists.map((a: any) => a.name).join(', '),
+ albumArtUrl: t.album?.images?.[0]?.url ?? null,
+ });
+ });
 
-                allTracks = allTracks.concat(tracks);
+ allTracks = allTracks.concat(tracks);
 
-                if (tracks.length < limit) {
+ if (tracks.length < limit) {
                     hasMore = false; // Stop fetching if fewer than the limit results are returned
                 } else {
                     offset += limit; // Increment offset for the next API call

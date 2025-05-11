@@ -161,8 +161,10 @@ export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (contex
       return;
     }
 
-    const songEnded = !playerState.isPlaying ||
-                      (playerState.trackId !== nextSong.spotifyTrackId);
+    // A song is considered 'ended' if Spotify is not playing AND there was a track before (playerState.trackId is null but there was a previous one),
+    // OR if the current track is the one from the queue and it's almost finished (within 2 seconds of the end).
+    const songEnded = (!playerState.isPlaying && playerState.trackId !== null) ||
+                      (playerState.trackId === nextSong.spotifyTrackId && playerState.progress_ms >= playerState.duration_ms - 2000); // 2-second buffer
 
     if (songEnded) {
       console.log("⏭️ Intentando reproducir:", nextSong.title);
@@ -170,7 +172,9 @@ export const checkAndPlayNextTrack = onSchedule("every 8 seconds", async (contex
       await new Promise(res => setTimeout(res, 3000));
 
       const newPlayerState = await getSpotifyPlayerState(accessToken);
-      if (newPlayerState.isPlaying && newPlayerState.trackId === nextSong.spotifyTrackId) {
+      // Only remove the song from the queue if the new state confirms that the intended song is now playing.
+      // This prevents removing the song if playback failed or a different song started playing.
+      if (newPlayerState.isPlaying && newPlayerState.trackId === nextSong.spotifyTrackId && newPlayerState.progress_ms > 0) {
         console.log("✅ Confirmado: canción reproducida. Eliminando de la cola.");
         await db.ref(`/queue/${nextSong.id}`).remove();
       } else {
@@ -226,6 +230,7 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
           }
         );
 
+        console.log('Spotify Playlist Search API Response Data:', response.data);
         const qLower = query.toLowerCase();
         tracks = (response.data.items || [])
           .map((i: any) => i.track)
