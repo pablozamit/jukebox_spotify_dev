@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -58,7 +57,6 @@ interface QueueSong {
   timestampAdded: number;
   order: number;
 }
-
 
 interface PlaylistDetails {
   name: string;
@@ -312,40 +310,37 @@ export default function ClientPage() {
       (snap) => {
         const data = snap.val() || {};
         const items = Object.entries(data || {})
-  .map(([key, val]) => {
-    const song = val as any;
+          .map(([key, val]) => {
+            const song = val as any;
 
-    if (
-      !song ||
-      typeof song !== 'object' ||
-      typeof song.title !== 'string' ||
-      typeof song.artist !== 'string' ||
-      typeof song.spotifyTrackId !== 'string'
-    ) {
-      return null;
-    }
+            if (
+              !song ||
+              typeof song !== 'object' ||
+              typeof song.title !== 'string' ||
+              typeof song.artist !== 'string' ||
+              typeof song.spotifyTrackId !== 'string'
+            ) {
+              return null;
+            }
 
-    const timestampAdded = typeof song.timestampAdded === 'number' ? song.timestampAdded : 0;
-    const order = typeof song.order === 'number' ? song.order : timestampAdded;
+            const timestampAdded = typeof song.timestampAdded === 'number' ? song.timestampAdded : 0;
+            const order = typeof song.order === 'number' ? song.order : timestampAdded;
 
-    const result: QueueSong = {
-      id: key,
-      title: song.title,
-      artist: song.artist,
-      spotifyTrackId: song.spotifyTrackId,
-      albumArtUrl: song.albumArtUrl ?? null,
-      addedByUserId: song.addedByUserId ?? '',
-      timestampAdded,
-      order,
-    };
+            const result: QueueSong = {
+              id: key,
+              title: song.title,
+              artist: song.artist,
+              spotifyTrackId: song.spotifyTrackId,
+              albumArtUrl: song.albumArtUrl ?? null,
+              addedByUserId: song.addedByUserId ?? '',
+              timestampAdded,
+              order,
+            };
 
-    return result;
-  })
-  .filter((item): item is QueueSong => item !== null)
-  .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0));
-
-
-
+            return result;
+          })
+          .filter((item): item is QueueSong => item !== null)
+          .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0));
 
         setQueue(items as QueueSong[]);
 
@@ -405,33 +400,32 @@ export default function ClientPage() {
   }, [searchTerm, spotifyConfig, isLoadingConfig, toast]);
 
   // Este sigue siendo el de búsqueda — se deja tal cual
-useEffect(() => {
-  if (!isMounted || isLoadingConfig) return;
-  const id = setTimeout(doSearch, 500);
-  return () => clearTimeout(id);
-}, [searchTerm, doSearch, isMounted, isLoadingConfig]);
+  useEffect(() => {
+    if (!isMounted || isLoadingConfig) return;
+    const id = setTimeout(doSearch, 500);
+    return () => clearTimeout(id);
+  }, [searchTerm, doSearch, isMounted, isLoadingConfig]);
 
-// Este es NUEVO: detecta que faltan menos de 3 segundos para que termine
-useEffect(() => {
-  if (!currentPlaying?.track) return;
+  // Este es NUEVO: detecta que faltan menos de 3 segundos para que termine
+  useEffect(() => {
+    if (!currentPlaying?.track) return;
 
-  const remaining = currentPlaying.track.duration_ms - currentPlaying.track.progress_ms;
+    const remaining = currentPlaying.track.duration_ms - currentPlaying.track.progress_ms;
 
-  if (remaining < 3000 && !syncLock.current) {
-    syncLock.current = true;
+    if (remaining < 3000 && !syncLock.current) {
+      syncLock.current = true;
 
-    fetch('/api/spotify/sync', { method: 'POST' })
-      .catch((error) => {
-        console.error('Error al sincronizar siguiente canción:', error);
-      })
-      .finally(() => {
-        setTimeout(() => {
-          syncLock.current = false;
-        }, 10000);
-      });
-  }
-}, [currentPlaying]);
-
+      fetch('/api/spotify/sync', { method: 'POST' })
+        .catch((error) => {
+          console.error('Error al sincronizar siguiente canción:', error);
+        })
+        .finally(() => {
+          setTimeout(() => {
+            syncLock.current = false;
+          }, 10000);
+        });
+    }
+  }, [currentPlaying]);
 
   // 7. Añadir canción a la cola
   const handleAddSong = async (song: Song) => {
@@ -493,81 +487,78 @@ useEffect(() => {
   };
 
   // 7.1 Load All Songs
-    const handleLoadAllSongs = async () => {
-        if (!spotifyConfig || spotifyConfig.searchMode !== 'playlist' || !spotifyConfig.playlistId) {
-            toast({
-                title: 'Error de Configuración',
-                description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.',
-                variant: 'destructive',
-            });
-            return;
+  const handleLoadAllSongs = async () => {
+    if (!spotifyConfig || spotifyConfig.searchMode !== 'playlist' || !spotifyConfig.playlistId) {
+      toast({
+        title: 'Error de Configuración',
+        description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsLoadingSearch(true);
+    try {
+      // Fetch all tracks from the playlist using multiple API calls if necessary
+      let allTracks: Song[] = [];
+      let offset = 0;
+      const limit = 50; // Maximum limit allowed by Spotify API
+      let hasMore = true;
+
+      while (hasMore) {
+        const url = `/api/searchSpotify?mode=playlist&playlistId=${spotifyConfig.playlistId}&offset=${offset}&limit=${limit}`;
+        console.log('Fetching playlist tracks with URL:', url);
+        const res = await fetch(url);
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || `Error ${res.status}`);
         }
 
-        setIsLoadingSearch(true);
-        try {
-            // Fetch all tracks from the playlist using multiple API calls if necessary
-            let allTracks: Song[] = [];
-            let offset = 0;
-            const limit = 50; // Maximum limit allowed by Spotify API
-            let hasMore = true;
+        console.log('API Response object:', res);
+        const data = await res.json();
+        console.log('API Response data:', data);
 
-            while (hasMore) {
-                const url = `/api/searchSpotify?mode=playlist&playlistId=${spotifyConfig.playlistId}&offset=${offset}&limit=${limit}`;
-                console.log('Fetching playlist tracks with URL:', url);
-                const res = await fetch(url);
-
-                if (!res.ok) {
-                    const errorData = await res.json();
-                    throw new Error(errorData.error || `Error ${res.status}`);
-                }
-
-                console.log('API Response object:', res);
-                const data = await res.json();
-                console.log('API Response data:', data);
-
-                if (!data.items || !Array.isArray(data.items)) {
-                    // Add logging for debugging
-                    console.error('data.results is undefined!', data);
-
-                    console.warn('Spotify API did not return expected "results" array:', data);
-                    hasMore = false; // Stop fetching if no results are returned
- break;
-                }
-
-                const tracks: Song[] = (data.results as any[]).map((t: any) => ({
-                    spotifyTrackId: t.id,
-                    title: t.name,
-                    artist: t.artists.map((a: any) => a.name).join(', '),
-                    albumArtUrl: t.album?.images?.[0]?.url ?? null,
-                }));
-
-
- allTracks = allTracks.concat(tracks);
-
- if (tracks.length < limit) {
-                    hasMore = false; // Stop fetching if fewer than the limit results are returned
-                } else {
-                    offset += limit; // Increment offset for the next API call
-                }
-            }
-
-            setSearchResults(allTracks);
-            toast({
-                title: 'Playlist Cargada',
-                description: `Se cargaron ${allTracks.length} canciones de la playlist.`,
-            });
-        } catch (error: any) {
-            console.error('Error al cargar todas las canciones:', error);
-            toast({
-                title: 'Error al Cargar Playlist',
-                description: error.message || 'No se pudieron cargar todas las canciones de la playlist.',
-                variant: 'destructive',
-            });
-        } finally {
-            setIsLoadingSearch(false);
+        // --- PARTE MODIFICADA ---
+        if (!data.results || !Array.isArray(data.results)) {
+          console.error('Spotify API did not return expected "results" array or it was empty:', data);
+          hasMore = false; // Stop fetching if no results are returned (implies last page or error)
+          break;
         }
-    };
+        // -----------------------
 
+        const tracks: Song[] = (data.results as any[]).map((t: any) => ({
+          spotifyTrackId: t.id,
+          title: t.name,
+          artist: t.artists.map((a: any) => a.name).join(', '),
+          albumArtUrl: t.album?.images?.[0]?.url ?? null,
+        }));
+
+        allTracks = allTracks.concat(tracks);
+
+        if (tracks.length < limit) {
+          hasMore = false; // Stop fetching if fewer than the limit results are returned
+        } else {
+          offset += limit; // Increment offset for the next API call
+        }
+      }
+
+      setSearchResults(allTracks);
+      toast({
+        title: 'Playlist Cargada',
+        description: `Se cargaron ${allTracks.length} canciones de la playlist.`,
+      });
+    } catch (error: any) {
+      console.error('Error al cargar todas las canciones:', error);
+      toast({
+        title: 'Error al Cargar Playlist',
+        description: error.message || 'No se pudieron cargar todas las canciones de la playlist.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingSearch(false);
+    }
+  };
 
   // 8. Quitar propia canción
   const handleRemoveSong = async (id: string) => {
@@ -843,17 +834,17 @@ useEffect(() => {
                 />
               </div>
               <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground mt-2 italic">
-                    Puedes añadir una canción o votar una ya añadida... pero no ambas.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleLoadAllSongs}
-                    disabled={isLoadingConfig || !spotifyConfig || spotifyConfig.searchMode !== 'playlist' || !spotifyConfig.playlistId || isLoadingSearch}
-                  >
-                    {isLoadingSearch ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : 'Ver Todas las Canciones'}
-                  </Button>
+                <p className="text-xs text-muted-foreground mt-2 italic">
+                  Puedes añadir una canción o votar una ya añadida... pero no ambas.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLoadAllSongs}
+                  disabled={isLoadingConfig || !spotifyConfig || spotifyConfig.searchMode !== 'playlist' || !spotifyConfig.playlistId || isLoadingSearch}
+                >
+                  {isLoadingSearch ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : 'Ver Todas las Canciones'}
+                </Button>
               </div>
               <ScrollArea className="flex-1 -mx-4 px-4">
                 <div className="space-y-2 pr-2 pb-4">
