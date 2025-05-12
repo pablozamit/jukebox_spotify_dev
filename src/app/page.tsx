@@ -526,17 +526,11 @@ export default function ClientPage() {
           break;
         }
         // -----------------------
-
         const tracks: Song[] = (data.results as any[]).map((t: any) => ({
-          spotifyTrackId: t.id,
-          title: t.name,
-          // Verificación para t.artists
+          spotifyTrackId: t.spotifyTrackId || t.id,
+          title: t.title || t.name,
           artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : t.artist ?? 'Artista Desconocido',
-
-          // Verificación para t.album y t.album.images
-          albumArtUrl: t.album?.images && Array.isArray(t.album.images) && t.album.images.length > 0
-            ? t.album.images[0].url ?? null
-            : null,
+          albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
         }));
         
 
