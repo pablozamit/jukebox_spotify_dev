@@ -85,12 +85,14 @@ async function playTrack(accessToken: string, deviceId: string, trackId: string)
 }
 
 async function getNextTrack(db: admin.database.Database): Promise<any | null> {
+  console.error("DEBUG: Intentando obtener siguiente cancion de la cola");
   const snap = await db.ref('/queue').once('value');
   const queue = snap.val() || {};
 
   const songs = Object.entries(queue).map(([id, val]: any) => ({
     id,
     ...val,
+    // Use nullish coalescing for order and spotifyTrackId for robustness
     order: val.order ?? val.timestampAdded ?? 0,
     spotifyTrackId: val.spotifyTrackId ?? val.id,
   }));
@@ -111,6 +113,7 @@ export async function POST() {
   const db = getFirebaseApp().database();
 
   try {
+    console.error("DEBUG: Iniciando sincronizacion");
     const tokensSnap = await db.ref('/admin/spotify/tokens').once('value');
     const tokens = tokensSnap.val();
 
@@ -121,6 +124,7 @@ export async function POST() {
 
     const accessToken = await refreshTokenIfNeeded(tokens);
     const deviceId = await getActiveDeviceId(accessToken);
+    console.error("DEBUG: Device ID:", deviceId);
 
     const song = await getNextTrack(db);
     if (!song) {
@@ -128,6 +132,7 @@ export async function POST() {
     }
 
     const playbackState = await getPlaybackState(accessToken);
+    console.error("DEBUG: Playback State:", playbackState);
 
     const isPlaying = playbackState?.is_playing;
     const currentTrackId = playbackState?.item?.id;
@@ -136,11 +141,17 @@ export async function POST() {
     const progressMs = playbackState?.progress_ms || 0;
     const durationMs = playbackState?.item?.duration_ms || 0;
     const timeRemainingMs = durationMs - progressMs;
+    console.error(`DEBUG: isPlaying: ${isPlaying}, currentTrackId: ${currentTrackId}, timeRemainingMs: ${timeRemainingMs}`);
+    console.error(`DEBUG: Siguiente cancion ID en cola: ${song.spotifyTrackId}`);
 
     // If Spotify is not playing, or is playing a different song than the one at the top of the queue,
     // OR if the current song is the correct one but is nearing its end (less than SAFETY_BUFFER_MS remaining)
     if (!isPlaying || currentTrackId !== song?.spotifyTrackId || (currentTrackId === song?.spotifyTrackId && timeRemainingMs < SAFETY_BUFFER_MS)) {
+      console.error("DEBUG: Condicion de reproduccion cumplida. Intentando reproducir la siguiente.");
       if (song) { // Ensure 'song' is not null
+        // Consider a more robust way to handle removing from the queue after successful play
+        // The current logic only removes if the *previous* state's track matched the queued one.
+        console.error("DEBUG: Llamando a playTrack para:", song.spotifyTrackId);
         await playTrack(accessToken, deviceId, song.spotifyTrackId);
         if (currentTrackId === song?.spotifyTrackId) await db.ref(`/queue/${song.id}`).remove(); // Only remove if we were playing the correct track
         return NextResponse.json({ success: true, played: song });
@@ -149,6 +160,7 @@ export async function POST() {
       }
     } else {
       // Spotify is playing the correct song, do nothing
+      console.error("DEBUG: Spotify esta reproduciendo la cancion correcta. No se necesita accion.");
       return NextResponse.json({ message: 'Spotify is playing the correct track.' });
     }
   } catch (err: any) {
