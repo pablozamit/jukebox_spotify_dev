@@ -530,9 +530,16 @@ export default function ClientPage() {
         const tracks: Song[] = (data.results as any[]).map((t: any) => ({
           spotifyTrackId: t.id,
           title: t.name,
-          artist: t.artists.map((a: any) => a.name).join(', '),
-          albumArtUrl: t.album?.images?.[0]?.url ?? null,
+          // Verificación para t.artists
+          artist: Array.isArray(t.artists) && t.artists.length > 0
+            ? t.artists.map((a: any) => a.name).join(', ')
+            : 'Artista Desconocido',
+          // Verificación para t.album y t.album.images
+          albumArtUrl: t.album?.images && Array.isArray(t.album.images) && t.album.images.length > 0
+            ? t.album.images[0].url ?? null
+            : null,
         }));
+        
 
         allTracks = allTracks.concat(tracks);
 
