@@ -110,6 +110,9 @@ export async function GET(request: Request) {
       console.warn('⚠️ tracks no es un array válido');
       return NextResponse.json({ results: [] });
     }
+    
+    return NextResponse.json({ results }); // ← Esto faltaba
+    
 
     return NextResponse.json({ results });
 
