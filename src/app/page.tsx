@@ -526,6 +526,7 @@ export default function ClientPage() {
           break;
         }
         // -----------------------
+        // IMPORTANTE: Lógica de mapeo de Spotify. NO MODIFICAR sin verificar la estructura exacta del response de la API de Playlist.
         const tracks: Song[] = (data.results as any[]).map((t: any) => ({
           spotifyTrackId: t.spotifyTrackId || t.id,
           title: t.title || t.name,
