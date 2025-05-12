@@ -531,9 +531,8 @@ export default function ClientPage() {
           spotifyTrackId: t.id,
           title: t.name,
           // Verificación para t.artists
-          artist: Array.isArray(t.artists) && t.artists.length > 0
-            ? t.artists.map((a: any) => a.name).join(', ')
-            : 'Artista Desconocido',
+          artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : t.artist ?? 'Artista Desconocido',
+
           // Verificación para t.album y t.album.images
           albumArtUrl: t.album?.images && Array.isArray(t.album.images) && t.album.images.length > 0
             ? t.album.images[0].url ?? null
