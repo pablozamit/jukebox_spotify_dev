@@ -534,21 +534,13 @@ useEffect(() => {
  break;
                 }
 
-                const tracks: Song[] = (data.results as any[]).map((t) => ({
+                const tracks: Song[] = (data.results as any[]).map((t: any) => ({
                     spotifyTrackId: t.id,
                     title: t.name,
                     artist: t.artists.map((a: any) => a.name).join(', '),
                     albumArtUrl: t.album?.images?.[0]?.url ?? null,
                 }));
- (data.items as any[]).map((item) => {
- const t = item.track;
- return ({
- spotifyTrackId: t.id,
- title: t.name,
- artist: t.artists.map((a: any) => a.name).join(', '),
- albumArtUrl: t.album?.images?.[0]?.url ?? null,
- });
- });
+
 
  allTracks = allTracks.concat(tracks);
 
