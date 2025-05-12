@@ -840,6 +840,10 @@ export default function AdminPage() {
           </CardFooter>
         </Card>
       </div>
+
+ <footer className="w-full text-center text-gray-500 text-sm p-4">
+ Version: {process.env.NEXT_PUBLIC_APP_VERSION}
+ </footer>
     </div>
   );
 }

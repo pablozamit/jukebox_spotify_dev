@@ -977,6 +977,10 @@ useEffect(() => {
       <footer className="text-center mt-12 mb-6 text-sm text-muted-foreground">
         Hecho con ❤️ y 🎵 para tu disfrute.
       </footer>
+
+      <footer className="w-full text-center text-gray-500 text-sm p-4">
+        Version: {process.env.NEXT_PUBLIC_APP_VERSION}
+      </footer>
     </div>
   );
 }
