@@ -383,9 +383,17 @@ export default function ClientPage() {
     setIsLoadingSearch(true);
     try {
       const res = await searchSpotify(searchTerm, spotifyConfig);
-      console.log('Raw search response:', res);
-      console.log('Search results data:', res);
-      setSearchResults(res);
+console.log('Raw search response:', res);
+
+// Protección robusta contra null/undefined/estructura inesperada
+const safeResults = Array.isArray(res)
+  ? res.filter((t): t is Song => !!t && typeof t === 'object' && typeof t.spotifyTrackId === 'string' && typeof t.title === 'string' && typeof t.artist === 'string')
+  : [];
+
+
+setSearchResults(safeResults);
+
+
     } catch (e: any) {
       console.error('Error en la búsqueda de Spotify:', e);
       toast({
