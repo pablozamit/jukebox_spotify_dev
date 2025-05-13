@@ -398,12 +398,15 @@ export default function AdminPage() {
       const res = await fetch(`/api/searchSpotify?${params.toString()}`);
       const data = await res.json();
       const results = Array.isArray(data.results) ? data.results : [];
-      const songs: Song[] = results.map((t: any) => ({
-        spotifyTrackId: t.spotifyTrackId || t.id,
-        title: t.title || t.name,
-        artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-        albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-      }));
+      const songs: Song[] = Array.isArray(results)
+  ? results.map((t: any) => ({
+      spotifyTrackId: t.spotifyTrackId || t.id,
+      title: t.title || t.name,
+      artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+      albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+    }))
+  : [];
+
       setSearchResults(songs);
     } catch (e: any) {
       console.error('Error búsqueda Spotify:', e);
@@ -439,12 +442,15 @@ export default function AdminPage() {
       const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}&limit=100`);
       const data = await res.json();
       const results = Array.isArray(data.results) ? data.results : [];
-      const songs: Song[] = results.map((t: any) => ({
-        spotifyTrackId: t.spotifyTrackId || t.id,
-        title: t.title || t.name,
-        artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-        albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-      }));
+      const songs: Song[] = Array.isArray(results)
+  ? results.map((t: any) => ({
+      spotifyTrackId: t.spotifyTrackId || t.id,
+      title: t.title || t.name,
+      artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+      albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+    }))
+  : [];
+
       setSearchResults(songs);
     } catch (e: any) {
       toast({ title: 'Error al cargar', description: e.message });

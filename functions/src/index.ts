@@ -277,7 +277,8 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       }
 
       if (!Array.isArray(tracks)) {
-        console.warn("⚠️ La respuesta no es un array, forzando array vacío.");
+        console.warn(return res.status(200).json({ results: tracks });
+"⚠️ La respuesta no es un array, forzando array vacío.");
         console.log("searchSpotify: Spotify API response for tracks was not an array.");
         tracks = [];
       }
