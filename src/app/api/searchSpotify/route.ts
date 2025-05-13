@@ -96,19 +96,28 @@ export async function GET(request: Request) {
 
     const results = Array.isArray(tracks)
   ? tracks
-      .filter(t => t && typeof t === 'object' && t.id && t.name && Array.isArray(t.artists))
-      .map(t => ({
+      .filter(
+        (t) =>
+          t &&
+          typeof t === 'object' &&
+          typeof t.id === 'string' &&
+          typeof t.name === 'string' &&
+          Array.isArray(t.artists) &&
+          t.artists.every((a) => typeof a.name === 'string')
+      )
+      .map((t) => ({
         spotifyTrackId: t.id,
         title: t.name,
-        artist: t.artists.map(a => a.name).join(', '),
+        artist: t.artists.map((a) => a.name).join(', '),
         album: {
-          name: t.album?.name ?? "",
+          name: typeof t.album?.name === 'string' ? t.album.name : '',
           images: Array.isArray(t.album?.images) ? t.album.images : [],
         },
         uri: t.uri,
         preview_url: t.preview_url,
       }))
   : [];
+
 
 
     if (!Array.isArray(tracks)) {

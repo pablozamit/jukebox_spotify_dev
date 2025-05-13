@@ -528,19 +528,23 @@ setSearchResults(safeResults);
         console.log('API Response data:', data);
 
         // --- PARTE MODIFICADA ---
-        if (!data.results || !Array.isArray(data.results)) {
-          console.error('Spotify API did not return expected "results" array or it was empty:', data);
-          hasMore = false; // Stop fetching if no results are returned (implies last page or error)
-          break;
+        if (!data || !Array.isArray(data.results)) {
+          console.error('Spotify API: estructura inesperada o sin resultados:', data);
+          setSearchResults([]);
+          return;
         }
-        // -----------------------
-        // IMPORTANTE: Lógica de mapeo de Spotify. NO MODIFICAR sin verificar la estructura exacta del response de la API de Playlist.
-        const tracks: Song[] = (data.results as any[]).map((t: any) => ({
-          spotifyTrackId: t.spotifyTrackId || t.id,
-          title: t.title || t.name,
-          artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : t.artist ?? 'Artista Desconocido',
-          albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-        }));
+        
+        const tracks: Song[] = data.results
+          .filter((t: any) => t && typeof t === 'object' && typeof t.id === 'string')
+          .map((t: any) => ({
+            spotifyTrackId: t.id,
+            title: typeof t.name === 'string' ? t.name : '(Sin título)',
+            artist: Array.isArray(t.artists)
+              ? t.artists.map((a: any) => a.name).filter(Boolean).join(', ')
+              : 'Artista desconocido',
+            albumArtUrl: t.album?.images?.[0]?.url ?? null,
+          }));
+        
         
 
         allTracks = allTracks.concat(tracks);

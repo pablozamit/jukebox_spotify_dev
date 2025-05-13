@@ -45,10 +45,14 @@ export async function GET(request: Request) {
     );
 
     const playlistDetails = {
-      name: playlistRes.data.name,
-      description: playlistRes.data.description,
-      imageUrl: playlistRes.data.images?.[0]?.url ?? null, // Get the first image URL
+      name: typeof playlistRes.data.name === 'string' ? playlistRes.data.name : 'Sin nombre',
+      description: typeof playlistRes.data.description === 'string' ? playlistRes.data.description : '',
+      imageUrl:
+        Array.isArray(playlistRes.data.images) && typeof playlistRes.data.images[0]?.url === 'string'
+          ? playlistRes.data.images[0].url
+          : null,
     };
+    
 
     return NextResponse.json(playlistDetails);
 
