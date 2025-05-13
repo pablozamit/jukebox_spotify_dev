@@ -95,7 +95,6 @@ async function getActiveDeviceId(accessToken: string): Promise<string> {
   return device.id;
 }
 
-// Función auxiliar para reproducir una canción
 async function playTrack(accessToken: string, deviceId: string, trackId: string): Promise<void> {
   console.log(`playTrack: Attempting to play track ${trackId} on device ${deviceId}.`);
   console.log('playTrack: Calling Spotify API /me/player/play.');
@@ -107,25 +106,23 @@ async function playTrack(accessToken: string, deviceId: string, trackId: string)
   console.log(`Attempted to play track ${trackId} on device ${deviceId}`);
 }
 
-// Función auxiliar para obtener la siguiente canción de la cola
 async function getNextTrack(db: admin.database.Database): Promise<any | null> {
   console.log('getNextTrack: Starting to get next track from queue.');
   const snap = await db.ref('/queue').once('value');
   console.log('getNextTrack: Read queue data from /queue.');
   const queue = snap.val() || {};
 
-  const songs = Object.entries(queue).map(([id, val]: any) => ({
+  const songs = Object.entries(queue).map(([id, val]: [string, any]) => ({
     id,
     ...val,
     order: val.order ?? val.timestampAdded ?? 0,
   }));
 
   songs.sort((a, b) => a.order - b.order);
-  console.log('getNextTrack: Sorted queue:', songs.map(s => s.title));
+  console.log('getNextTrack: Sorted queue:', songs.map((s: any) => s.title));
   return songs[0] || null;
 }
 
-// Función auxiliar para obtener estado del reproductor
 async function getSpotifyPlayerState(accessToken: string): Promise<any> {
   console.log('getSpotifyPlayerState: Starting to get player state.');
   try {
@@ -161,7 +158,6 @@ async function getSpotifyPlayerState(accessToken: string): Promise<any> {
   }
 }
 
-// Cloud Function programada principal
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
 export const checkAndPlayNextTrack = onSchedule({ schedule: "every 8 seconds", timeoutSeconds: 60 }, async (context) => {
@@ -183,39 +179,42 @@ export const checkAndPlayNextTrack = onSchedule({ schedule: "every 8 seconds", t
       return;
     }
 
-    const songEnded = (!playerState.isPlaying && playerState.trackId !== null) ||
-                      (playerState.trackId === nextSong.spotifyTrackId && playerState.progress_ms >= playerState.duration_ms - 2000);
-    console.log(`checkAndPlayNextTrack: Song Ended check: isPlaying=${playerState.isPlaying}, trackId=${playerState.trackId}, nextSong.spotifyTrackId=${nextSong.spotifyTrackId}, progress_ms=${playerState.progress_ms}, duration_ms=${playerState.duration_ms}, songEnded=${songEnded}`);
-    if (songEnded) {
-      console.log("⏭️ Intentando reproducir:", nextSong.title);
-      await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
-      console.log("checkAndPlayNextTrack: Play track request sent. Waiting 3 seconds for playback to start.");
-      await new Promise(res => setTimeout(res, 3000));
+    const remainingMs = playerState.duration_ms - playerState.progress_ms;
+    const estimatedLatency = 1000; // Ajusta este valor según pruebas reales
 
-      console.log("checkAndPlayNextTrack: Checking player state again after play attempt.");
-      const newPlayerState = await getSpotifyPlayerState(accessToken);
-      if (newPlayerState.isPlaying && newPlayerState.trackId === nextSong.spotifyTrackId && newPlayerState.progress_ms > 0) {
-        console.log("✅ Confirmado: canción reproducida. Eliminando de la cola.");
-        await db.ref(`/queue/${nextSong.id}`).remove();
-        console.log(`checkAndPlayNextTrack: Removed song ${nextSong.id} from queue.`);
+    if (remainingMs <= 3000) {
+      const delay = remainingMs - estimatedLatency;
+      console.log(`⏱️ Song ending soon. Remaining: ${remainingMs}ms. Delay before play: ${delay}ms`);
+
+      if (delay > 0) {
+        setTimeout(async () => {
+          try {
+            console.log("⏭️ (Delayed) Intentando reproducir:", nextSong.title);
+            await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
+            await db.ref(`/queue/${nextSong.id}`).remove();
+            console.log(`✅ (Delayed) Canción reproducida y eliminada de la cola.`);
+          } catch (err: any) {
+            console.error("❌ Error en reproducción retrasada:", err.message);
+          }
+        }, delay);
       } else {
-        console.warn("⚠️ No se pudo confirmar que la canción esté sonando.");
+        console.log("⚠️ Delay negativo, reproduciendo inmediatamente.");
+        await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
+        await db.ref(`/queue/${nextSong.id}`).remove();
+        console.log(`✅ (Immediate) Canción reproducida y eliminada de la cola.`);
       }
+      return; // Evita que el resto de la función continúe
     } else {
-      const remaining = playerState.duration_ms - playerState.progress_ms;
-      console.log(`🎵 Canción aún sonando (${remaining}ms restantes), sin acción.`);
+      console.log(`✅ Canción actual con tiempo restante suficiente: ${remainingMs}ms`);
     }
-
   } catch (error: any) {
-    console.error("🔥 Error en checkAndPlayNextTrack:", error.message, error.stack);
+    console.error("❌ Error in checkAndPlayNextTrack:", error.message, error.stack);
+    throw error;
   }
-  console.log("checkAndPlayNextTrack: Finished.");
 });
 
-// Función de búsqueda en Spotify
 export const searchSpotify = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
-    console.log("searchSpotify: Received search request.");
     console.log("searchSpotify: Request method:", req.method, "Query parameters:", req.query);
     try {
       if (req.method !== "GET") {
@@ -244,28 +243,34 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
         console.log("searchSpotify: Searching within playlist.");
         if (!playlistId) {
           res.status(400).json({ error: "Playlist ID not configured" });
+          console.log("searchSpotify: Playlist ID not configured.");
           return;
         }
 
-        const response = await axios.get(
-          `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            params: {
-              fields: "items(track(id,name,artists(name),album(name),uri,preview_url))",
-              limit: 100,
-            },
-          }
-        );
-
-        console.log('searchSpotify: Spotify Playlist Search API Response Status:', response.status, 'Data:', response.data);
-        const qLower = query.toLowerCase();
-        tracks = (response.data.items || [])
-          .map((i: any) => i.track)
-          .filter((t: any) =>
-            t.name.toLowerCase().includes(qLower) ||
-            t.artists.some((a: any) => a.name.toLowerCase().includes(qLower))
+        try {
+          const response = await axios.get(
+            `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              params: {
+                fields: "items(track(id,name,artists(name),album(name),uri,preview_url))",
+                limit: 100,
+              },
+            }
           );
+
+          console.log('searchSpotify: Spotify Playlist Search API Response Status:', response.status, 'Data:', response.data);
+          const qLower = query.toLowerCase();
+          tracks = (response.data.items || [])
+            .map((i: any) => i.track)
+            .filter((t: any) =>
+              t.name.toLowerCase().includes(qLower) ||
+              t.artists.some((a: any) => a.name.toLowerCase().includes(qLower))
+            );
+        } catch (error: any) {
+          console.error("❌ Error fetching playlist tracks:", error.message, error.stack);
+          throw error;
+        }
       } else {
         console.log("searchSpotify: Performing general Spotify search.");
         const response = await axios.get("https://api.spotify.com/v1/search", {
@@ -277,9 +282,8 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       }
 
       if (!Array.isArray(tracks)) {
-        console.warn(return res.status(200).json({ results: tracks });
-"⚠️ La respuesta no es un array, forzando array vacío.");
-        console.log("searchSpotify: Spotify API response for tracks was not an array.");
+        console.warn("searchSpotify: ⚠️ Spotify API response for tracks was not an array, forcing empty array.");
+        console.log("searchSpotify: Received non-array response:", tracks);
         tracks = [];
       }
 
@@ -290,16 +294,15 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
         album: t.album.name,
         uri: t.uri,
         preview_url: t.preview_url,
-      }));
+      })).filter((t: any) => t.id !== null); // Filter out any tracks without an ID
       console.log("searchSpotify: Processed search results count:", results.length);
       console.log("searchSpotify: Sending search results response.");
-      res.status(200).json({ results });
+      return res.status(200).json({ results });
 
     } catch (error: any) {
       console.error("❌ Error en searchSpotify:", error.message, error.stack);
       console.log("searchSpotify: Sending error response.");
-      res.status(500).json({ error: error.message || "Internal Server Error", stack: error.stack });
+      return res.status(500).json({ error: error.message || "Internal Server Error", stack: error.stack });
     }
-    console.log("searchSpotify: Finished.");
   });
 });
