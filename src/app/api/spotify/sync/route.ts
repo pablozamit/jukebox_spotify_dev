@@ -167,11 +167,17 @@ export async function POST() {
     const playbackState = await getPlaybackState(accessToken);
     console.error("DEBUG: Playback State:", JSON.stringify(playbackState, null, 2));
 
-    // If Spotify is paused, and a track is loaded, assume intentional pause and do nothing.
-    if (playbackState && playbackState.item && !playbackState.is_playing) {
-      console.error("DEBUG: Spotify is paused, skipping sync.");
-      return NextResponse.json({ message: 'Spotify is paused, no sync needed.' });
-    }
+    const isSongFinished =
+  playbackState &&
+  !playbackState.is_playing &&
+  playbackState.item &&
+  playbackState.progress_ms >= playbackState.item.duration_ms;
+
+if (!isSongFinished) {
+  console.error("DEBUG: Canción no ha terminado. Se respeta el estado actual (reproduciendo o pausado).");
+  return NextResponse.json({ message: 'Playback active or paused. No sync needed.' });
+}
+
 
     // Get the next track from the queue
     const nextQueueSong = await getNextTrack(db);
@@ -211,12 +217,11 @@ export async function POST() {
       console.error(`DEBUG: isPlaying: ${isPlaying}, currentTrackId: ${currentTrackId}, timeRemainingMs: ${timeRemainingMs}`);
       console.error(`DEBUG: Siguiente cancion ID en cola: ${nextQueueSong.spotifyTrackId}`);
 
-      // Determine if we need to play the next track from the queue.
-      // This happens if:
-      // 1. Spotify is not playing anything (playbackState?.item == null)
-      // 2. Spotify is playing a different track than the one at the top of the queue (currentTrackId !== nextQueueSong?.spotifyTrackId)
-      // 3. Spotify is playing the correct track, but it's near its end (currentTrackId === nextQueueSong?.spotifyTrackId && timeRemainingMs < SAFETY_BUFFER_MS)
-      if (playbackState?.item == null || currentTrackId !== nextQueueSong?.spotifyTrackId || (currentTrackId === nextQueueSong?.spotifyTrackId && timeRemainingMs < SAFETY_BUFFER_MS)) {
+      if (
+        playbackState?.item == null ||
+        currentTrackId !== nextQueueSong?.spotifyTrackId ||
+        (!playbackState.is_playing && progressMs >= durationMs)
+      ) {
         console.error("DEBUG: Condicion de reproduccion cumplida para la cola. Intentando reproducir la siguiente:", nextQueueSong.spotifyTrackId);
         await playTrack(accessToken, deviceId, nextQueueSong.spotifyTrackId);
         console.error("DEBUG: Llamada a playTrack completada. Eliminando cancion de la cola:", nextQueueSong.id);
