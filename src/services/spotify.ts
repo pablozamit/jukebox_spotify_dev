@@ -70,11 +70,20 @@ export async function searchSpotify(
   }
 
   // Map the API response to the Song interface
-  return (body.results as SpotifyTrack[]).map((t) => ({
+  return (body.results as SpotifyTrack[])
+  .filter(
+    (t): t is SpotifyTrack =>
+      t &&
+      typeof t.id === 'string' &&
+      typeof t.name === 'string' &&
+      Array.isArray(t.artists) &&
+      t.artists.every((a) => a && typeof a.name === 'string')
+  )
+  .map((t) => ({
     spotifyTrackId: t.id,
     title: t.name,
     artist: t.artists.map((a) => a.name).join(', '),
-    // Get the first available album image URL, or null if none exist
-    albumArtUrl: t.album.images?.[0]?.url ?? null,
+    albumArtUrl: Array.isArray(t.album?.images) ? t.album.images[0]?.url ?? null : null,
   }));
+
 }
