@@ -94,7 +94,10 @@ export async function GET(request: Request) {
 
     }
 
-    const results = Array.isArray(tracks)
+    console.log("🔍 Respuesta cruda de tracks:", JSON.stringify(tracks, null, 2));
+
+const results = Array.isArray(tracks)
+
   ? tracks
       .filter(
         (t) =>
