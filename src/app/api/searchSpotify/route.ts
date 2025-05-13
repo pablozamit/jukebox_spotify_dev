@@ -94,17 +94,22 @@ export async function GET(request: Request) {
 
     }
 
-    const results = tracks.map(t => ({
-      spotifyTrackId: t.id,
-      title: t.name,
- artist: Array.isArray(t.artists) && t.artists.length > 0 ? t.artists.map(a => a.name).join(', ') : '',
-      album: {
-        name: t.album?.name ?? "",
- images: Array.isArray(t.album?.images) ? t.album.images : [],
-      },
-      uri: t.uri,
-      preview_url: t.preview_url,
-    }));
+    const results = Array.isArray(tracks)
+  ? tracks
+      .filter(t => t && typeof t === 'object' && t.id && t.name && Array.isArray(t.artists))
+      .map(t => ({
+        spotifyTrackId: t.id,
+        title: t.name,
+        artist: t.artists.map(a => a.name).join(', '),
+        album: {
+          name: t.album?.name ?? "",
+          images: Array.isArray(t.album?.images) ? t.album.images : [],
+        },
+        uri: t.uri,
+        preview_url: t.preview_url,
+      }))
+  : [];
+
 
     if (!Array.isArray(tracks)) {
       console.warn('⚠️ tracks no es un array válido');
