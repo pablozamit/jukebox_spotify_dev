@@ -535,15 +535,21 @@ setSearchResults(safeResults);
         }
         
         const tracks: Song[] = data.results
-          .filter((t: any) => t && typeof t === 'object' && typeof t.id === 'string')
-          .map((t: any) => ({
-            spotifyTrackId: t.id,
-            title: typeof t.name === 'string' ? t.name : '(Sin título)',
-            artist: Array.isArray(t.artists)
-              ? t.artists.map((a: any) => a.name).filter(Boolean).join(', ')
-              : 'Artista desconocido',
-            albumArtUrl: t.album?.images?.[0]?.url ?? null,
-          }));
+  .filter(
+    (t: any) =>
+      t &&
+      typeof t === 'object' &&
+      typeof t.spotifyTrackId === 'string' &&
+      typeof t.title === 'string' &&
+      typeof t.artist === 'string'
+  )
+  .map((t: any) => ({
+    spotifyTrackId: t.spotifyTrackId,
+    title: t.title,
+    artist: t.artist,
+    albumArtUrl: t.album?.images?.[0]?.url ?? null,
+  }));
+
         
         
 
