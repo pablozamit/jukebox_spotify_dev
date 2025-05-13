@@ -6,14 +6,15 @@ import axios from 'axios';
 interface SpotifyTrackItem {
   id: string;
   name: string;
-  artists: { name: string }[];
+  artists: { name: string; href?: string }[];
   album: {
     name: string;
-    images?: { url: string }[]; // Include images array
+    images?: { url: string; height?: number; width?: number }[];
   };
   uri: string;
   preview_url: string | null;
 }
+
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
