@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
 import { auth, db, isDbValid } from '@/lib/firebase';
+import SpotifyPlaybackSDK from '@/components/SpotifyPlaybackSDK';
 import { useToast } from '@/hooks/use-toast';
 import useSWR from 'swr';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -14,14 +15,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-
 import {
   ListMusic, Music, Trash2, ArrowUp, ArrowDown, Settings,
   Search, Home, LogOut, AlertTriangle, RefreshCw, PlusCircle, ExternalLink, ListVideo
 } from 'lucide-react';
 import Image from 'next/image';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-
 
 interface QueueSong {
   id: string;
@@ -55,7 +54,6 @@ interface PlaylistDetails {
   externalUrl?: string;
 }
 
-
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error('Error al cargar datos.');
@@ -73,23 +71,49 @@ export default function AdminPage() {
   const [config, setConfig] = useState<SpotifyConfig>({ searchMode: 'all' });
   const [playlistIdInput, setPlaylistIdInput] = useState('');
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
-  const [spotifyStatus, setSpotifyStatus] = useState<null | {
+  const [sdkPlaybackState, setSdkPlaybackState] = useState<any>(null);
+  const [sdkReady, setSdkReady] = useState(false);
+  const [sdkDeviceId, setSdkDeviceId] = useState<string | null>(null);
+  const sdkPlayerRef = useRef<any>(null);
+  interface SpotifyStatus {
     spotifyConnected: boolean;
     tokensOk: boolean;
     playbackAvailable: boolean;
-    message?: string;
     activeDevice?: { id: string; name: string; type: string };
-  }>(null);
+    message?: string;
+  }
+  
+  const [spotifyStatus, setSpotifyStatus] = useState<SpotifyStatus | null>(null);
+  const [spotifyAccessToken, setSpotifyAccessToken] = useState<string | null>(null);
   const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
   const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
-
-
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<Song[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
 
   const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 3000 });
 
+  // Fetch Spotify Access Token
+  useEffect(() => {
+    const fetchAccessToken = async () => {
+      try {
+        const res = await fetch('/api/spotify/token');
+        const json = await res.json();
+        if (json.accessToken) {
+          setSpotifyAccessToken(json.accessToken);
+        } else {
+          console.error('No access token received');
+        }
+      } catch (error) {
+        console.error('Error fetching Spotify access token:', error);
+      }
+    };
+    if (spotifyStatus?.spotifyConnected) {
+      fetchAccessToken();
+    }
+  }, [spotifyStatus?.spotifyConnected]);
+
+  // Authentication Check
   useEffect(() => {
     if (!auth) {
       setLoadingAuth(false);
@@ -104,6 +128,7 @@ export default function AdminPage() {
     return () => unsub();
   }, [router]);
 
+  // Queue Listener
   useEffect(() => {
     if (!db || !user) {
       setIsLoadingQueue(false);
@@ -136,7 +161,6 @@ export default function AdminPage() {
             .filter((item): item is QueueSong => item !== null)
             .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-
           setQueue(items);
         } catch (error) {
           console.error('Error processing queue data:', error);
@@ -151,6 +175,7 @@ export default function AdminPage() {
     }
   }, [user, toast]);
 
+  // Config Listener
   useEffect(() => {
     if (!db || !user) {
       setIsLoadingConfig(false);
@@ -177,7 +202,7 @@ export default function AdminPage() {
     }
   }, [user, toast]);
 
-  // Fetch Playlist Details when config is loaded and in playlist mode
+  // Playlist Details Fetch
   useEffect(() => {
     if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
       setPlaylistDetails(null);
@@ -213,13 +238,21 @@ export default function AdminPage() {
     fetchDetails();
   }, [config, toast]);
 
-
+  // Spotify Status Check
   useEffect(() => {
     const checkStatus = async () => {
       try {
         const res = await fetch('/api/spotify/status');
         const json = await res.json();
-        setSpotifyStatus(json);
+        if (
+          typeof json.spotifyConnected === 'boolean' &&
+          typeof json.tokensOk === 'boolean' &&
+          typeof json.playbackAvailable === 'boolean'
+        ) {
+          setSpotifyStatus(json as SpotifyStatus);
+        } else {
+          throw new Error('Respuesta de /api/spotify/status no tiene el formato esperado');
+        }
         if (db && json.spotifyConnected) {
           update(ref(db, '/config'), { spotifyConnected: true });
         } else if (db && !json.spotifyConnected) {
@@ -238,46 +271,59 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [db]);
 
-
+  // Playback Sync
   useEffect(() => {
     let isSyncing = false;
     const interval = setInterval(async () => {
-        if (isSyncing) return;
-        isSyncing = true;
-        try {
-            const res = await fetch('/api/spotify/sync', { method: 'POST' });
-            if (!res.ok) {
-                const errorText = await res.text();
-                console.warn('Sync API non-OK response:', errorText);
-                return;
-            }
-            const json = await res.json();
-            if (json.success || json.message === 'Playback in progress, skipping sync' || json.message === 'Queue is empty') {
-                // Expected outcomes, no toast needed unless action taken
-                if (json.played) {
-                     toast({
-                       title: '🎵 Reproducción automática',
-                       description: `Ahora suena: ${json.played.title}`,
-                     });
-                }
-            } else if (json.warning) {
-                console.warn("Sync warning:", json.warning, json.queued);
-            } else if (json.error) {
-                console.error("Sync error reported by API:", json.error);
-            }
-            mutateCurrentPlaying(); // Refresh current playing track
-        } catch (e: any) {
-            // Catch actual network errors or unparseable responses
-            console.error('Error en llamada a /api/spotify/sync:', e.message || e);
-        } finally {
-            isSyncing = false;
+      if (isSyncing) return;
+      isSyncing = true;
+      try {
+        const res = await fetch('/api/spotify/sync', { method: 'POST' });
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.warn('Sync API non-OK response:', errorText);
+          return;
         }
-    }, 8000); // Check every 8 seconds
-
+        const json = await res.json();
+        if (json.success || json.message === 'Playback in progress, skipping sync' || json.message === 'Queue is empty') {
+          if (json.played) {
+            toast({
+              title: '🎵 Reproducción automática',
+              description: `Ahora suena: ${json.played.title}`,
+            });
+          }
+        } else if (json.warning) {
+          console.warn("Sync warning:", json.warning, json.queued);
+        } else if (json.error) {
+          console.error("Sync error reported by API:", json.error);
+        }
+        mutateCurrentPlaying();
+      } catch (e: any) {
+        console.error('Error en llamada a /api/spotify/sync:', e.message || e);
+      } finally {
+        isSyncing = false;
+      }
+    }, 8000);
     return () => clearInterval(interval);
-}, [toast, mutateCurrentPlaying]);
+  }, [toast, mutateCurrentPlaying]);
 
+  // Handle Track End Notification
+  const handleTrackEndNotification = async () => {
+    console.log('Canción terminada, notificando backend...');
+    try {
+      const res = await fetch('/api/playback/track-ended', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        console.log('Backend notificado correctamente de la canción terminada.');
+      } else {
+        console.error('Error al notificar al backend:', json.error);
+      }
+    } catch (error) {
+      console.error('Error al notificar al backend sobre el fin de la canción:', error);
+    }
+  };
 
+  // Remove Song from Queue
   const handleRemoveSong = async (songId: string) => {
     if (!db) return;
     try {
@@ -295,6 +341,7 @@ export default function AdminPage() {
     }
   };
 
+  // Move Song in Queue
   const handleMove = async (index: number, direction: -1 | 1) => {
     if (!db) return;
     const newQueue = [...queue];
@@ -304,12 +351,11 @@ export default function AdminPage() {
 
     const updates: Record<string, any> = {};
     newQueue.forEach((song, i) => {
-      updates[`/queue/${song.id}/order`] = i * 1000; // Simple order based on index
+      updates[`/queue/${song.id}/order`] = i * 1000;
     });
 
     try {
       await update(ref(db), updates);
-      // setQueue(newQueue); // Firebase onValue will update the queue state
       toast({ title: 'Orden actualizado', description: 'El orden de la canción ha cambiado.' });
     } catch (error) {
       console.error("Error updating queue order:", error);
@@ -317,25 +363,24 @@ export default function AdminPage() {
     }
   };
 
+  // Spotify Connect/Disconnect
   const handleSpotifyAction = async () => {
     if (spotifyStatus?.spotifyConnected) {
       try {
         await fetch('/api/spotify/disconnect', { method: 'POST' });
         setSpotifyStatus(prev => prev ? { ...prev, spotifyConnected: false, tokensOk: false, playbackAvailable: false } : null);
         if (db) update(ref(db, '/config'), { spotifyConnected: false });
-        if (db) remove(ref(db, '/admin/spotify/tokens'))
- // Clear tokens from DB
+        if (db) remove(ref(db, '/admin/spotify/tokens'));
         toast({ title: "Spotify Desconectado", description: "Se han borrado los tokens de Spotify." });
       } catch (e) {
         toast({ title: "Error", description: "No se pudo desconectar Spotify.", variant: "destructive" });
       }
     } else {
-      // The connect endpoint will handle the redirect and cookie setting
       window.location.href = '/api/spotify/connect';
     }
   };
 
-
+  // Add Song to Queue
   const handleAddSong = async (song: Song) => {
     if (!db || !user) return;
 
@@ -353,29 +398,29 @@ export default function AdminPage() {
     const newRef = push(qRef);
     const maxOrder = queue.length > 0 ? Math.max(...queue.map((i) => i.order ?? 0)) : 0;
 
-
     await set(newRef, {
       ...song,
       timestampAdded: serverTimestamp(),
       order: maxOrder + 1000,
-      addedByUserId: user?.uid || 'admin', // Mark as added by admin
-      albumArtUrl: song.albumArtUrl || null, // Ensure albumArtUrl is present or null
+      addedByUserId: user?.uid || 'admin',
+      albumArtUrl: song.albumArtUrl || null,
     });
 
     toast({
       title: 'Canción añadida',
       description: `${song.title} ha sido añadida a la cola por el admin.`,
     });
-    setSearchTerm(''); // Clear search after adding
+    setSearchTerm('');
     setSearchResults([]);
   };
 
+  // Search Songs
   const doSearch = useCallback(async () => {
     if (!searchTerm.trim() || !config) {
       setSearchResults([]);
       return;
     }
-  
+
     if (config.searchMode === 'playlist' && !config.playlistId) {
       toast({
         title: 'Playlist no configurada',
@@ -384,7 +429,7 @@ export default function AdminPage() {
       });
       return;
     }
-  
+
     setIsLoadingSearch(true);
     try {
       const params = new URLSearchParams({
@@ -394,18 +439,18 @@ export default function AdminPage() {
       if (config.searchMode === 'playlist' && config.playlistId) {
         params.append('playlistId', config.playlistId);
       }
-  
+
       const res = await fetch(`/api/searchSpotify?${params.toString()}`);
       const data = await res.json();
       const results = Array.isArray(data.results) ? data.results : [];
       const songs: Song[] = Array.isArray(results)
-  ? results.map((t: any) => ({
-      spotifyTrackId: t.spotifyTrackId || t.id,
-      title: t.title || t.name,
-      artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-      albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-    }))
-  : [];
+        ? results.map((t: any) => ({
+            spotifyTrackId: t.spotifyTrackId || t.id,
+            title: t.title || t.name,
+            artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+            albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+          }))
+        : [];
 
       setSearchResults(songs);
     } catch (e: any) {
@@ -415,19 +460,19 @@ export default function AdminPage() {
       setIsLoadingSearch(false);
     }
   }, [searchTerm, config, toast]);
-  
 
   useEffect(() => {
     const delay = setTimeout(() => {
-      if (searchTerm.trim()) { // Only search if searchTerm is not empty
+      if (searchTerm.trim()) {
         doSearch();
       } else {
-        setSearchResults([]); // Clear results if search term is empty
+        setSearchResults([]);
       }
     }, 500);
     return () => clearTimeout(delay);
   }, [searchTerm, doSearch]);
 
+  // Load All Songs from Playlist
   const handleLoadAllSongs = async () => {
     if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
       toast({
@@ -443,13 +488,13 @@ export default function AdminPage() {
       const data = await res.json();
       const results = Array.isArray(data.results) ? data.results : [];
       const songs: Song[] = Array.isArray(results)
-  ? results.map((t: any) => ({
-      spotifyTrackId: t.spotifyTrackId || t.id,
-      title: t.title || t.name,
-      artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-      albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-    }))
-  : [];
+        ? results.map((t: any) => ({
+            spotifyTrackId: t.spotifyTrackId || t.id,
+            title: t.title || t.name,
+            artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
+            albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
+          }))
+        : [];
 
       setSearchResults(songs);
     } catch (e: any) {
@@ -458,14 +503,14 @@ export default function AdminPage() {
       setIsLoadingSearch(false);
     }
   };
-  
 
+  // Save Config
   const handleConfigSave = async () => {
     if (!db) return;
     try {
       await update(ref(db, '/config'), {
         searchMode: config.searchMode,
-        playlistId: playlistIdInput.trim() || null, // Store null if empty
+        playlistId: playlistIdInput.trim() || null,
       });
       toast({ title: 'Configuración guardada', description: 'Los cambios se han guardado correctamente.' });
     } catch (error) {
@@ -474,12 +519,13 @@ export default function AdminPage() {
     }
   };
 
+  // Clear Queue
   const handleClearQueue = async () => {
     if (!db) return;
     const isConfirmed = window.confirm("¿Estás seguro de que quieres vaciar completamente la cola? Esta acción no se puede deshacer.");
     if (!isConfirmed) return;
 
-    setIsLoadingQueue(true); // Indicate loading while clearing
+    setIsLoadingQueue(true);
     try {
       const queueRef = ref(db, '/queue');
       await remove(queueRef);
@@ -491,11 +537,11 @@ export default function AdminPage() {
       console.error('Error clearing queue:', error);
       toast({ title: 'Error', description: 'No se pudo vaciar la cola.', variant: 'destructive' });
     } finally {
-      setIsLoadingQueue(false); // Stop loading indicator
+      setIsLoadingQueue(false);
     }
   };
 
-  if (loadingAuth || isLoadingConfig) { // Show loading if either auth or initial config is loading
+  if (loadingAuth || isLoadingConfig) {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
@@ -505,16 +551,27 @@ export default function AdminPage() {
   }
 
   if (!user) {
-    // This should ideally not be reached due to the redirect in the auth effect,
-    // but it's a good fallback.
     return null;
   }
 
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6 min-h-screen">
+      {/* Spotify Playback SDK Integration */}
+      {spotifyStatus?.spotifyConnected && sdkReady && spotifyAccessToken && (
+        <SpotifyPlaybackSDK
+          ref={sdkPlayerRef}
+          accessToken={spotifyAccessToken}
+          onStateChange={setSdkPlaybackState}
+          onTrackEnd={handleTrackEndNotification}
+          onReady={(deviceId) => {
+            setSdkReady(true);
+            setSdkDeviceId(deviceId);
+          }}
+        />
+      )}
+
       {/* Columna principal */}
       <div className="flex-1 space-y-6">
-
         {/* ── Ahora Suena ── */}
         <Card className="shadow-lg rounded-lg border border-border/70">
           <CardHeader className="pb-2">
@@ -523,22 +580,18 @@ export default function AdminPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {!currentPlaying ? (
-              <Skeleton className="h-16 w-full" />
-            ) : currentPlaying.isPlaying && currentPlaying.track ? (
+            {sdkPlaybackState && sdkPlaybackState.track_window && sdkPlaybackState.track_window.current_track ? (
               <div className="flex gap-4 items-center">
                 <Image
-                  src={currentPlaying.track.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.track.id}/64`}
-                  alt={currentPlaying.track.name || 'Album art'}
-                  data-ai-hint="album cover"
+                  src={sdkPlaybackState.track_window.current_track.album.images[0]?.url || `https://picsum.photos/seed/${sdkPlaybackState.track_window.current_track.id}/64`}
+                  alt={sdkPlaybackState.track_window.current_track.name}
                   width={64}
                   height={64}
                   className="rounded-md shadow-md"
                 />
                 <div className="flex-1 overflow-hidden">
-                  <p className="font-semibold truncate ">{currentPlaying.track.name}</p>
-                  <p className="text-sm text-muted-foreground truncate">{currentPlaying.track.artists.join(', ')}</p>
-                  {/* Progress bar removed as per request */}
+                  <p className="font-semibold truncate">{sdkPlaybackState.track_window.current_track.name}</p>
+                  <p className="text-sm text-muted-foreground truncate">{sdkPlaybackState.track_window.current_track.artists.map((a: any) => a.name).join(', ')}</p>
                 </div>
               </div>
             ) : (
@@ -555,7 +608,7 @@ export default function AdminPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <ScrollArea className="h-96"> {/* Increased height */}
+            <ScrollArea className="h-96">
               {isLoadingQueue ? (
                 <div className="p-4 space-y-3">
                   {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-md" />)}
@@ -575,7 +628,6 @@ export default function AdminPage() {
                       <div className="flex-1 overflow-hidden">
                         <p className="truncate font-medium text-sm">{song.title}</p>
                         <p className="truncate text-xs text-muted-foreground">{song.artist}</p>
-                        {/* <p className="text-xs text-muted-foreground">Votos: {song.votes ?? 0}</p> */}
                       </div>
                       <div className="flex gap-1.5">
                         <TooltipProvider delayDuration={100}>
@@ -604,7 +656,7 @@ export default function AdminPage() {
                 </div>
               ) : (
                 <div className="p-4">
-                 <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
+                  <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
                 </div>
               )}
             </ScrollArea>
@@ -615,7 +667,7 @@ export default function AdminPage() {
         <Card className="shadow-lg rounded-lg border border-border/70">
           <CardHeader>
             <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-              <Search className="h-5 w-5" />Añadir Canciones
+              <Search className="h-5 w-5" /> Añadir Canciones
             </CardTitle>
             {config.searchMode === 'playlist' && playlistDetails && (
               <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
@@ -636,7 +688,7 @@ export default function AdminPage() {
                     <TooltipContent>
                       <p>{playlistDetails.name}</p>
                       {playlistDetails.description && <p className="text-xs text-muted-foreground">{playlistDetails.description}</p>}
-                       {playlistDetails.externalUrl && <p className="text-xs text-accent underline mt-1">Abrir en Spotify</p>}
+                      {playlistDetails.externalUrl && <p className="text-xs text-accent underline mt-1">Abrir en Spotify</p>}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -659,7 +711,7 @@ export default function AdminPage() {
                 </Button>
               )}
             </div>
-            <ScrollArea className="h-72 border rounded-md"> {/* Increased height and added border */}
+            <ScrollArea className="h-72 border rounded-md">
               <div className="p-2 space-y-1">
                 {isLoadingSearch ? (
                   [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)
@@ -696,10 +748,10 @@ export default function AdminPage() {
                   ))
                 ) : searchTerm ? (
                   <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
-                ): (
-                   <p className="text-center text-sm text-muted-foreground py-4 italic">
-                     {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
-                   </p>
+                ) : (
+                  <p className="text-center text-sm text-muted-foreground py-4 italic">
+                    {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
+                  </p>
                 )}
               </div>
             </ScrollArea>
@@ -708,7 +760,7 @@ export default function AdminPage() {
       </div>
 
       {/* Columna lateral */}
-      <div className="w-full md:w-96 space-y-6"> {/* Increased width */}
+      <div className="w-full md:w-96 space-y-6">
         <Card className="shadow-lg rounded-lg border border-border/70">
           <CardHeader>
             <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
@@ -760,8 +812,8 @@ export default function AdminPage() {
                   spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
                     ? 'default'
                     : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
-                      ? 'secondary'
-                      : 'destructive'
+                    ? 'secondary'
+                    : 'destructive'
                 }
                 className="w-full"
               >
@@ -777,7 +829,7 @@ export default function AdminPage() {
               )}
             </div>
           </CardContent>
-         <CardFooter className="flex flex-col gap-2 pt-4 border-t">
+          <CardFooter className="flex flex-col gap-2 pt-4 border-t">
             <Button variant="outline" onClick={() => router.push('/')} className="w-full">
               <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
             </Button>
@@ -802,26 +854,25 @@ export default function AdminPage() {
                       description: `Ahora suena: ${json.played?.title || 'siguiente en cola'}.`,
                     });
                   } else if (json.message) {
-                     toast({
-                       title: 'ℹ️ Sincronización Forzada',
-                       description: json.message,
-                       variant: json.message === 'Queue is empty' ? 'default' : 'destructive',
-                     });
+                    toast({
+                      title: 'ℹ️ Sincronización Forzada',
+                      description: json.message,
+                      variant: json.message === 'Queue is empty' ? 'default' : 'destructive',
+                    });
                   } else if (json.warning) {
-                     toast({
-                       title: '⚠️ Advertencia Sincronización',
-                       description: json.warning,
-                       variant: 'default',
-                     });
-                  }
-                   else {
+                    toast({
+                      title: '⚠️ Advertencia Sincronización',
+                      description: json.warning,
+                      variant: 'default',
+                    });
+                  } else {
                     toast({
                       title: '⚠️ No se pudo forzar',
                       description: json.error || 'Respuesta desconocida del servidor.',
                       variant: 'destructive',
                     });
                   }
-                  mutateCurrentPlaying(); // Actualizar vista de "Ahora Suena"
+                  mutateCurrentPlaying();
                 } catch (e: any) {
                   console.error('Error forzando sincronización:', e);
                   toast({
@@ -847,9 +898,9 @@ export default function AdminPage() {
         </Card>
       </div>
 
- <footer className="w-full text-center text-gray-500 text-sm p-4">
- Version: {process.env.NEXT_PUBLIC_APP_VERSION}
- </footer>
+      <footer className="w-full text-center text-gray-500 text-sm p-4">
+        Version: {process.env.NEXT_PUBLIC_APP_VERSION}
+      </footer>
     </div>
   );
 }

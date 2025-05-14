@@ -17,7 +17,7 @@ if (!admin.apps.length) {
 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://barjukebox-default-rtdb.europe-west1.firebasedatabase.app",
+    databaseURL: "https://barjukebox-default-rtdb.europe-west1.fire basedatabase.app",
   });
 }
 
@@ -79,41 +79,10 @@ async function getValidAccessToken(): Promise<string> {
   return accessToken;
 }
 
-// Función auxiliar para obtener dispositivo activo
-async function getActiveDeviceId(accessToken: string): Promise<string> {
-  console.log('getActiveDeviceId: Starting to find active device.');
-  console.log('getActiveDeviceId: Calling Spotify API to list devices.');
-  const res = await axios.get('https://api.spotify.com/v1/me/player/devices', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  const device = res.data.devices.find((d: any) => d.is_active) || res.data.devices[0];
-  if (!device?.id) {
-    throw new Error('No active or available Spotify devices found.');
-  }
-  console.log('getActiveDeviceId: Found active device:', device.id);
-  return device.id;
-}
-
-async function playTrack(accessToken: string, deviceId: string, trackId: string): Promise<void> {
-  console.log(`playTrack: Attempting to play track ${trackId} on device ${deviceId}.`);
-  try {
-    console.log("playTrack: Calling Spotify API /me/player/play.");
-    const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
-    const headers = { Authorization: `Bearer ${accessToken}` };
-    const body = { uris: [`spotify:track:${trackId}`] };
-    await axios.put(url, body, { headers });
-    console.log(`Attempted to play track ${trackId} on device ${deviceId}`);
-  } catch (error: any) {
-    console.error("❌ Error in playTrack:", error.message, error.stack);
-    throw error;
-  }
-}
-
+// Mantener getNextTrack para gestionar la lógica de la cola
 async function getNextTrack(db: admin.database.Database): Promise<any | null> {
   console.log('getNextTrack: Starting to get next track from queue.');
   const snap = await db.ref('/queue').once('value');
-  console.log('getNextTrack: Read queue data from /queue.');
   const queue = snap.val() || {};
 
   const songs = Object.entries(queue).map(([id, val]: [string, any]) => ({
@@ -127,96 +96,85 @@ async function getNextTrack(db: admin.database.Database): Promise<any | null> {
   return songs[0] || null;
 }
 
-async function getSpotifyPlayerState(accessToken: string): Promise<any> {
-  console.log('getSpotifyPlayerState: Starting to get player state.');
-  try {
-    console.log('getSpotifyPlayerState: Calling Spotify API /me/player/currently-playing.');
-    const playerRes = await axios.get('https://api.spotify.com/v1/me/player/currently-playing', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      validateStatus: (status) => status === 200 || status === 204 || status === 404,
-    });
+// Manejar notificación del frontend cuando una pista termina
+export const handleTrackEndNotification = functions.https.onRequest(async (req, res) => {
+  corsHandler(req, res, async () => {
+    console.log('handleTrackEndNotification: Received track end notification.');
+    try {
+      const nextSong = await getNextTrack(admin.database());
+      const db = admin.database();
 
-    if (playerRes.status === 204 || !playerRes.data) {
-      return { isPlaying: false, progress_ms: 0, duration_ms: 0, trackId: null };
-    }
-
-    const data = playerRes.data;
-    const item = data.item;
-
-    return {
-      isPlaying: data.is_playing,
-      progress_ms: data.progress_ms,
-      duration_ms: item?.duration_ms ?? 0,
-      trackId: item?.id ?? null,
-      isBuffering: data.is_buffering ?? false,
-    };
-
-  } catch (error: any) {
-    console.error("getSpotifyPlayerState: Error fetching player state:", error.message, error.stack);
-    if (error.response?.status === 404) {
-      console.log("Spotify player state: No active device or player not found.");
-      return { isPlaying: false, progress_ms: 0, duration_ms: 0, trackId: null };
-    }
-    console.error("Error getting Spotify player state:", error.message || error);
-    throw error;
-  }
-}
-
-import { onSchedule } from "firebase-functions/v2/scheduler";
-
-export const checkAndPlayNextTrack = onSchedule({ schedule: "every 8 seconds", timeoutSeconds: 60 }, async (context) => {
-  console.log("Running checkAndPlayNextTrack...");
-  console.log("checkAndPlayNextTrack: Context:", JSON.stringify(context));
-  const db = admin.database();
-
-  try {
-    const accessToken = await getValidAccessToken();
-    console.log("checkAndPlayNextTrack: Got valid access token.");
-    const deviceId = await getActiveDeviceId(accessToken);
-    console.log("checkAndPlayNextTrack: Got active device ID:", deviceId);
-    const playerState = await getSpotifyPlayerState(accessToken);
-    console.log("checkAndPlayNextTrack: Got Spotify player state:", playerState);
-    const nextSong = await getNextTrack(db);
-    console.log("checkAndPlayNextTrack: Got next song from queue:", nextSong);
-    if (!nextSong) {
-      console.log("🛑 No hay canciones en la cola.");
-      return;
-    }
-
-    const remainingMs = playerState.duration_ms - playerState.progress_ms;
-    const estimatedLatency = 300; // Ajusta este valor según pruebas reales
-
-    if (remainingMs <= 3000) {
-      const delay = remainingMs - estimatedLatency;
-      console.log(`⏱️ Song ending soon. Remaining: ${remainingMs}ms. Delay before play: ${delay}ms`);
-
-      if (delay > 0) {
-        setTimeout(async () => {
-          try {
-            console.log("⏭️ (Delayed) Intentando reproducir:", nextSong.title);
-            await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
-            await db.ref(`/queue/${nextSong.id}`).remove();
-            console.log(`✅ (Delayed) Canción reproducida y eliminada de la cola.`);
-          } catch (err: any) {
-            console.error("❌ Error en reproducción retrasada:", err.message);
-          }
-        }, delay);
+      if (nextSong) {
+        console.log(`handleTrackEndNotification: Next song found: ${nextSong.title}. Sending play command.`);
+        await db.ref('playback/command').set({ action: 'play', uri: `spotify:track:${nextSong.spotifyTrackId}`, timestamp: Date.now() });
+        console.log("handleTrackEndNotification: Play command sent to Firebase.");
       } else {
-        console.log("⚠️ Delay negativo, reproduciendo inmediatamente.");
-        await playTrack(accessToken, deviceId, nextSong.spotifyTrackId);
-        await db.ref(`/queue/${nextSong.id}`).remove();
-        console.log(`✅ (Immediate) Canción reproducida y eliminada de la cola.`);
+        console.log('handleTrackEndNotification: Queue is empty. Sending pause command.');
+        await db.ref('playback/command').set({ action: 'pause', timestamp: Date.now() });
+        console.log("handleTrackEndNotification: Pause command sent to Firebase.");
       }
-      return; // Evita que el resto de la función continúe
-    } else {
-      console.log(`✅ Canción actual con tiempo restante suficiente: ${remainingMs}ms`);
+      res.status(200).send({ success: true });
+    } catch (error: any) {
+      console.error("❌ handleTrackEndNotification: Error:", error.message, error.stack);
+      res.status(500).send({ success: false, error: error.message, stack: error.stack });
     }
-  } catch (error: any) {
-    console.error("❌ Error in checkAndPlayNextTrack:", error.message, error.stack);
-    throw error;
-  }
+  });
 });
 
+// Manejar confirmación del frontend cuando una pista comienza a reproducirse
+export const handleTrackStartedConfirmation = functions.https.onRequest(async (req, res) => {
+  corsHandler(req, res, async () => {
+    console.log('handleTrackStartedConfirmation: Received track started confirmation.');
+    const { spotifyTrackId } = req.body;
+    console.log('handleTrackStartedConfirmation: Confirmed track ID:', spotifyTrackId);
+
+    if (!spotifyTrackId) {
+      console.warn('handleTrackStartedConfirmation: Missing spotifyTrackId in request body.');
+      return res.status(400).send({ success: false, error: 'Missing spotifyTrackId' });
+    }
+
+    try {
+      const db = admin.database();
+      const snapshot = await db.ref('queue').orderByChild('spotifyTrackId').equalTo(spotifyTrackId).once('value');
+      const songToRemove = snapshot.val();
+
+      if (songToRemove) {
+        const songKey = Object.keys(songToRemove)[0];
+        console.log(`handleTrackStartedConfirmation: Found song in queue with key ${songKey}. Removing...`);
+        await db.ref(`queue/${songKey}`).remove();
+        console.log(`handleTrackStartedConfirmation: Song with ID ${spotifyTrackId} removed from queue.`);
+      } else {
+        console.log(`handleTrackStartedConfirmation: Song with ID ${spotifyTrackId} not found in queue (might have been removed already).`);
+      }
+      return res.status(200).send({ success: true });
+    } catch (error: any) {
+      console.error("❌ handleTrackStartedConfirmation: Error:", error.message, error.stack);
+      return res.status(500).send({ success: false, error: error.message, stack: error.stack });
+    }
+  });
+  // Asegurarse de que siempre se envíe una respuesta, incluso si corsHandler falla
+  res.status(500).send({ success: false, error: 'CORS handler failed to respond' });
+});
+
+// Obtener el token de acceso de Spotify para el frontend
+export const getSpotifyAccessToken = functions.https.onRequest(async (req, res) => {
+  corsHandler(req, res, async () => {
+    console.log("getSpotifyAccessToken: Received request.");
+    try {
+      const accessToken = await getValidAccessToken();
+      console.log("getSpotifyAccessToken: Successfully retrieved/refreshed access token.");
+      res.status(200).send({ accessToken });
+    } catch (error: any) {
+      console.error('❌ getSpotifyAccessToken: Error fetching/refreshing Spotify access token:', error.message, error.stack);
+      const statusCode = error.message.includes('No Spotify tokens found') ? 404 : 500;
+      res.status(statusCode).send({ error: error.message || 'Internal Server Error', stack: error.stack });
+    }
+  });
+  // Asegurarse de que siempre se envíe una respuesta
+  res.status(500).send({ success: false, error: 'CORS handler failed to respond' });
+});
+
+// Mantener searchSpotify ya que es una función útil del backend
 export const searchSpotify = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     console.log("searchSpotify: Request method:", req.method, "Query parameters:", req.query);
@@ -286,27 +244,14 @@ export const searchSpotify = functions.https.onRequest((req, res) => {
       }
 
       if (!Array.isArray(tracks)) {
-        console.warn("searchSpotify: ⚠️ Spotify API response for tracks was not an array, forcing empty array.");
-        console.log("searchSpotify: Received non-array response:", tracks);
+        console.warn("searchSpotify: Tracks is not an array, converting to empty array");
         tracks = [];
       }
 
-      const results = tracks.map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        artists: t.artists.map((a: any) => a.name),
-        album: t.album.name,
-        uri: t.uri,
-        preview_url: t.preview_url,
-      })).filter((t: any) => t.id !== null); // Filter out any tracks without an ID
-      console.log("searchSpotify: Processed search results count:", results.length);
-      console.log("searchSpotify: Sending search results response.");
-      return res.status(200).json({ results });
-
+      res.status(200).json({ tracks });
     } catch (error: any) {
-      console.error("❌ Error en searchSpotify:", error.message, error.stack);
-      console.log("searchSpotify: Sending error response.");
-      return res.status(500).json({ error: error.message || "Internal Server Error", stack: error.stack });
+      console.error("❌ searchSpotify: Error:", error.message, error.stack);
+      res.status(500).json({ error: error.message || "Internal Server Error" });
     }
   });
 });

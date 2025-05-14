@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
-// Removed Geist font import as it's not installed
-// import { GeistSans } from 'geist/font/sans';
 import './globals.css';
 import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
+import Script from 'next/script';
 
 export const metadata: Metadata = {
   title: 'Bar Jukebox',
@@ -18,17 +17,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        // Removed Geist font variable usage
-        // className={cn(
-        //   "min-h-screen bg-background font-sans antialiased",
-        //   GeistSans.variable
-        // )}
         className={cn(
           "min-h-screen bg-background font-sans antialiased"
         )}
       >
         {children}
         <Toaster />
+
+        {/* Carga el script de Spotify Web Playback SDK */}
+        <Script
+          src="https://sdk.scdn.co/spotify-player.js"
+          strategy="afterInteractive" // Cargar después de que la página sea interactiva
+        />
       </body>
     </html>
   );
