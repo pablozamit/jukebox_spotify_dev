@@ -98,26 +98,6 @@ export default function AdminPage() {
 
   const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 3000 });
 
-  // Fetch Spotify Access Token
-  useEffect(() => {
-    const fetchAccessToken = async () => {
-      try {
-        const res = await fetch('/api/spotify/token');
-        const json = await res.json();
-        if (json.accessToken) {
-          setSpotifyAccessToken(json.accessToken);
-        } else {
-          console.error('No access token received');
-        }
-      } catch (error) {
-        console.error('Error fetching Spotify access token:', error);
-      }
-    };
-    if (spotifyStatus?.spotifyConnected) {
-      fetchAccessToken();
-    }
-  }, [spotifyStatus?.spotifyConnected]);
-
   // Authentication Check
   useEffect(() => {
     if (!auth) {

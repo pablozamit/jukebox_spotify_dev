@@ -93,63 +93,72 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
     }));
 
     useEffect(() => {
-      const cleanup = () => {
-        if (player) {
-          console.log('Desconectando reproductor Spotify en cleanup...');
-          player.disconnect();
-        }
-
-        if (window.onSpotifyWebPlaybackSDKReady) {
-          window.onSpotifyWebPlaybackSDKReady = () => { console.log('SDK ready (placeholder)'); };
-        }
-      };
+      let scriptAdded = false;
 
       if (!accessToken) {
         console.log("No access token, desconectando reproductor si existe.");
-        cleanup();
+        if (player) {
+          player.disconnect();
+        }
         setPlayer(null);
         setIsReady(false);
         setCurrentPlaybackState(null);
         onStateChange?.(null);
-        return cleanup;
+        return;
       }
 
-      if (!window.Spotify) {
-        console.warn("Spotify Web Playback SDK no está cargado aún. Esperando window.onSpotifyWebPlaybackSDKReady.");
-        return cleanup;
-      }
+      // Define la función que se ejecutará cuando el SDK esté listo
+      const initializePlayer = () => {
+        if (!accessToken) {
+          console.warn("Access token no disponible durante onSpotifyWebPlaybackSDKReady. No se puede inicializar el reproductor.");
+          return;
+        }
+        if (player) {
+           console.log("Reproductor ya inicializado.");
+           return;
+        }
 
-      if (window.Spotify && accessToken && !player) {
-        console.log("SDK ya cargado y token disponible. Inicializando reproductor.");
+        console.log("onSpotifyWebPlaybackSDKReady disparado. Inicializando reproductor.");
 
-        const initializePlayer = () => {
-          const spotifyPlayer = new window.Spotify.Player({
-            name: 'Bar Jukebox',
-            getOAuthToken: (cb: (token: string) => void) => { cb(accessToken); },
-            volume: 0.5,
+        const spotifyPlayer = new window.Spotify.Player({
+          name: 'Bar Jukebox',
+          getOAuthToken: (cb: (token: string) => void) => { cb(accessToken); },
+          volume: 0.5,
+        });
+
+        spotifyPlayer.addListener('ready', ({ device_id }: { device_id: string }) => {
+          console.log('Dispositivo listo!', device_id);
+          setIsReady(true);
+          onReady?.(device_id);
+          toast({
+            title: 'Reproductor Listo',
+            description: 'El Jukebox está conectado a Spotify.',
           });
+        });
 
-          spotifyPlayer.addListener('ready', ({ device_id }: { device_id: string }) => {
-            console.log('Dispositivo listo!', device_id);
-            setIsReady(true);
-            onReady?.(device_id);
-            toast({
-              title: 'Reproductor Listo',
-              description: 'El Jukebox está conectado a Spotify.',
-            });
+        spotifyPlayer.addListener('not_ready', ({ device_id }: { device_id: string }) => {
+          console.log('Dispositivo se desconectó', device_id);
+          setIsReady(false);
+          toast({
+            title: 'Reproductor Desconectado',
+            description: 'El Jukebox se ha desconectado de Spotify.',
+            variant: 'destructive'
           });
+          setCurrentPlaybackState(null);
+          onStateChange?.(null);
+        });
 
-          spotifyPlayer.addListener('not_ready', ({ device_id }: { device_id: string }) => {
-            console.log('Dispositivo se desconectó', device_id);
-            setIsReady(false);
-            toast({
-              title: 'Reproductor Desconectado',
-              description: 'El Jukebox se ha desconectado de Spotify.',
-              variant: 'destructive'
-            });
-            setCurrentPlaybackState(null);
-            onStateChange?.(null);
+        spotifyPlayer.addListener('initialization_error', ({ message }: { message: string }) => {
+          console.error('Error de inicialización del SDK:', message);
+          toast({
+            title: 'Error del Reproductor Spotify',
+            description: `Fallo al iniciar el reproductor: ${message}`,
+            variant: 'destructive'
           });
+          setIsReady(false);
+          setCurrentPlaybackState(null);
+          onStateChange?.(null);
+        });
 
           spotifyPlayer.addListener('player_state_changed', (state: any) => {
             console.log('Estado del reproductor cambió:', state);
@@ -191,17 +200,6 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
             }
           });
 
-          spotifyPlayer.addListener('initialization_error', ({ message }: { message: string }) => {
-            console.error('Error de inicialización del SDK:', message);
-            toast({
-              title: 'Error del Reproductor Spotify',
-              description: `Fallo al iniciar el reproductor: ${message}`,
-              variant: 'destructive'
-            });
-            setIsReady(false);
-            setCurrentPlaybackState(null);
-            onStateChange?.(null);
-          });
 
           spotifyPlayer.addListener('authentication_error', ({ message }: { message: string }) => {
             console.error('Error de autenticación del SDK:', message);
@@ -236,18 +234,60 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
             });
           });
 
-          spotifyPlayer.connect();
-          setPlayer(spotifyPlayer);
-        };
+          // Conectar el reproductor
+          spotifyPlayer.connect().then((success: boolean) => {
+             if (success) {
+                 console.log("Reproductor Spotify conectado.");
+             } else {
+                 console.log("Reproductor Spotify no pudo conectarse.");
+             }
+          });
+          setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
+      };
 
-        if (window.Spotify) {
-          initializePlayer();
-        } else {
-          window.onSpotifyWebPlaybackSDKReady = initializePlayer;
-        }
+      // Asigna la función de inicialización a window.onSpotifyWebPlaybackSDKReady
+      window.onSpotifyWebPlaybackSDKReady = initializePlayer;
+
+      // Carga el script del SDK si no está ya cargado
+      if (!document.getElementById('spotify-sdk')) {
+        const script = document.createElement('script');
+        script.id = 'spotify-sdk';
+        script.src = 'https://sdk.scdn.co/spotify-player.js';
+        script.async = true;
+        document.body.appendChild(script);
+        scriptAdded = true;
+        console.log("Script del Spotify Web Playback SDK añadido dinámicamente.");
+      } else {
+         console.log("Script del Spotify Web Playback SDK ya presente.");
+         // Si el script ya está presente, pero el reproductor no se ha inicializado (por ejemplo, en una re-renderización)
+         // podemos intentar llamar initializePlayer directamente si el SDK ya está listo.
+         if (window.Spotify && !player) {
+              console.log("SDK ya presente y listo. Inicializando reproductor inmediatamente.");
+              initializePlayer();
+         }
       }
 
-      return cleanup;
+      // Función de limpieza
+      return () => {
+        console.log('Ejecutando cleanup para SpotifyPlaybackSDK...');
+        // Desconectar el reproductor si existe
+        if (player) {
+          console.log('Desconectando reproductor Spotify...');
+          player.disconnect();
+        }
+        // Restablecer la función onSpotifyWebPlaybackSDKReady para evitar duplicados
+        if (window.onSpotifyWebPlaybackSDKReady === initializePlayer) {
+            window.onSpotifyWebPlaybackSDKReady = () => { console.log('SDK ready (placeholder) - previous component unmounted'); };
+        }
+        // Remover el script si fue añadido por este componente
+        if (scriptAdded) {
+            const scriptElement = document.getElementById('spotify-sdk');
+            if (scriptElement) {
+                scriptElement.remove();
+                console.log("Script del Spotify Web Playback SDK removido.");
+            }
+        }
+      }
 
     }, [accessToken, toast, onStateChange, onTrackEnd, onReady, player]);
 
