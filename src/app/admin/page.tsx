@@ -54,6 +54,19 @@ interface PlaylistDetails {
   externalUrl?: string;
 }
 
+interface SpotifyStatus {
+  spotifyConnected: boolean;
+  tokensOk: boolean;
+  playbackAvailable: boolean;
+  activeDevice?: { id: string; name: string; type: string };
+  message?: string;
+}
+
+interface SpotifyPlaybackSDKRef {
+  playUri: (uri: string) => Promise<void>;
+  pause: () => Promise<void>;
+}
+
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error('Error al cargar datos.');
@@ -74,15 +87,7 @@ export default function AdminPage() {
   const [sdkPlaybackState, setSdkPlaybackState] = useState<any>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [sdkDeviceId, setSdkDeviceId] = useState<string | null>(null);
-  const sdkPlayerRef = useRef<any>(null);
-  interface SpotifyStatus {
-    spotifyConnected: boolean;
-    tokensOk: boolean;
-    playbackAvailable: boolean;
-    activeDevice?: { id: string; name: string; type: string };
-    message?: string;
-  }
-  
+  const sdkPlayerRef = useRef<SpotifyPlaybackSDKRef>(null);
   const [spotifyStatus, setSpotifyStatus] = useState<SpotifyStatus | null>(null);
   const [spotifyAccessToken, setSpotifyAccessToken] = useState<string | null>(null);
   const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
@@ -271,56 +276,80 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [db]);
 
-  // Playback Sync
-  useEffect(() => {
-    let isSyncing = false;
-    const interval = setInterval(async () => {
-      if (isSyncing) return;
-      isSyncing = true;
-      try {
-        const res = await fetch('/api/spotify/sync', { method: 'POST' });
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.warn('Sync API non-OK response:', errorText);
-          return;
-        }
-        const json = await res.json();
-        if (json.success || json.message === 'Playback in progress, skipping sync' || json.message === 'Queue is empty') {
-          if (json.played) {
-            toast({
-              title: '🎵 Reproducción automática',
-              description: `Ahora suena: ${json.played.title}`,
-            });
-          }
-        } else if (json.warning) {
-          console.warn("Sync warning:", json.warning, json.queued);
-        } else if (json.error) {
-          console.error("Sync error reported by API:", json.error);
-        }
-        mutateCurrentPlaying();
-      } catch (e: any) {
-        console.error('Error en llamada a /api/spotify/sync:', e.message || e);
-      } finally {
-        isSyncing = false;
-      }
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [toast, mutateCurrentPlaying]);
-
   // Handle Track End Notification
-  const handleTrackEndNotification = async () => {
-    console.log('Canción terminada, notificando backend...');
-    try {
-      const res = await fetch('/api/playback/track-ended', { method: 'POST' });
-      const json = await res.json();
-      if (json.success) {
-        console.log('Backend notificado correctamente de la canción terminada.');
-      } else {
-        console.error('Error al notificar al backend:', json.error);
-      }
-    } catch (error) {
-      console.error('Error al notificar al backend sobre el fin de la canción:', error);
+  const handleTrackEndNotification = async (endedTrackId: string | null) => {
+    console.log('Canción terminada, gestionando siguiente y notificando backend...');
+
+    if (!endedTrackId) {
+      console.warn('handleTrackEndNotification called without endedTrackId');
+      // Aunque no tengamos endedTrackId, intentaremos reproducir la siguiente si hay
     }
+
+    // 1. Notificar al backend para eliminar la canción anterior
+    if (endedTrackId) {
+      try {
+        const res = await fetch('/api/playback/track-ended', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ endedTrackId }),
+        });
+
+        const json = await res.json();
+
+        if (json.success) {
+          console.log(`Backend notificado correctamente de la canción terminada: ${endedTrackId}.`);
+        } else {
+          console.error('Error al notificar al backend:', json.error);
+          toast({ title: 'Error', description: 'Error al notificar al backend sobre el fin de la canción.', variant: 'destructive' });
+        }
+      } catch (error) {
+        console.error('Error en la llamada a /api/playback/track-ended:', error);
+        toast({ title: 'Error', description: 'Error de red al notificar al backend.', variant: 'destructive' });
+      }
+    } else {
+      console.warn('Skipping backend notification: No endedTrackId provided.');
+    }
+
+    // 2. Reproducir la siguiente canción de la cola (si existe)
+    const nextSong = queue[0]; // El primer elemento de la cola es el siguiente a sonar
+
+    if (nextSong && sdkReady && sdkDeviceId && spotifyAccessToken && sdkPlayerRef.current) {
+      console.log(`Reproduciendo la siguiente canción: ${nextSong.title}`);
+      try {
+        const trackUri = `spotify:track:${nextSong.spotifyTrackId}`;
+        await sdkPlayerRef.current.playUri(trackUri); // Ajustado para usar solo uri
+        toast({
+          title: '🎵 Reproduciendo siguiente canción',
+          description: `Ahora suena: ${nextSong.title}`,
+        });
+      } catch (error: any) {
+        console.error('Error al reproducir la siguiente canción con el SDK:', error);
+        toast({ title: 'Error de Reproducción', description: `No se pudo reproducir ${nextSong.title}.`, variant: 'destructive' });
+      }
+    } else if (queue.length > 0 && (!sdkReady || !sdkDeviceId || !spotifyAccessToken || !sdkPlayerRef.current)) {
+      console.warn("Skipping next song playback: SDK not ready or missing info.", {
+        sdkReady,
+        sdkDeviceId,
+        spotifyAccessToken: !!spotifyAccessToken,
+        sdkPlayerRef: !!sdkPlayerRef.current,
+      });
+    } else {
+      console.log('La cola está vacía o el reproductor no está listo. No hay siguiente canción para reproducir.');
+      if (sdkPlayerRef.current) {
+        try {
+          await sdkPlayerRef.current.pause();
+          console.log("Player paused as queue is empty.");
+        } catch (pauseError) {
+          console.error("Error pausing player:", pauseError);
+        }
+      }
+      toast({ title: 'Cola vacía', description: 'La cola de reproducción ha terminado.' });
+    }
+
+    // Mutar SWR para actualizar "Ahora Suena" si no usamos sdkPlaybackState
+    mutateCurrentPlaying();
   };
 
   // Remove Song from Queue
@@ -557,7 +586,7 @@ export default function AdminPage() {
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6 min-h-screen">
       {/* Spotify Playback SDK Integration */}
-      {spotifyStatus?.spotifyConnected && sdkReady && spotifyAccessToken && (
+      {spotifyStatus?.spotifyConnected && spotifyAccessToken && (
         <SpotifyPlaybackSDK
           ref={sdkPlayerRef}
           accessToken={spotifyAccessToken}

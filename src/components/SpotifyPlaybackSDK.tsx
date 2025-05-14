@@ -7,8 +7,8 @@ interface SpotifyPlaybackSDKProps {
   accessToken: string | null;
   // Callback para notificar al padre (page.tsx) sobre cambios de estado
   onStateChange?: (state: any) => void;
-  // Callback para notificar cuando una canción termina o está por terminar
-  onTrackEnd?: () => void;
+  // Callback para notificar cuando una canción termina o está por terminar, pasando el ID de la pista terminada
+  onTrackEnd?: (trackId: string | null) => void;
   // Callback para notificar cuando el reproductor está listo y dar su device_id
   onReady?: (deviceId: string) => void;
 }
@@ -167,7 +167,10 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
                 console.log(`Canción por terminar (quedan ${remaining}ms). Notificando...`);
                 notificationLock.current = true;
 
-                onTrackEnd?.();
+                // Pasa el ID de la canción que está terminando (la actual)
+                // O, para ser más precisos sobre la que *terminó*, la primera en previous_tracks
+                const endedTrackId = state.track_window?.previous_tracks?.[0]?.id || state.track_window?.current_track?.id || null;
+                onTrackEnd?.(endedTrackId);
 
                 setTimeout(() => { notificationLock.current = false; }, 5000); 
               }
@@ -175,7 +178,9 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
               console.log('Canción parece haber terminado (estado pausado en 0). Notificando...');
               if (!notificationLock.current) {
                 notificationLock.current = true;
-                onTrackEnd?.();
+                // Pasa el ID de la canción que estaba sonando antes de pausar en 0
+                const endedTrackId = currentPlaybackState.track_window?.current_track?.id || state.track_window?.previous_tracks?.[0]?.id || null;
+                onTrackEnd?.(endedTrackId);
                 setTimeout(() => { notificationLock.current = false; }, 5000);
               }
             }
