@@ -4,8 +4,8 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
-import { auth, db, isDbValid } from '@/lib/firebase';
-import SpotifyPlaybackSDK from '@/components/SpotifyPlaybackSDK';
+import { auth, db } from '@/lib/firebase';
+import { SpotifyPlaybackSDK } from '@/components/SpotifyPlaybackSDK';
 import { useToast } from '@/hooks/use-toast';
 import useSWR from 'swr';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -295,11 +295,31 @@ export default function AdminPage() {
     // 2. Reproducir la siguiente canción de la cola (si existe)
     const nextSong = queue[0]; // El primer elemento de la cola es el siguiente a sonar
 
-    if (nextSong && sdkReady && sdkDeviceId && spotifyAccessToken && sdkPlayerRef.current) {
-      console.log(`Reproduciendo la siguiente canción: ${nextSong.title}`);
+    if (nextSong) {
+      const trackUri = `spotify:track:${nextSong.spotifyTrackId}`;
+
+      let retries = 0;
+      while (
+        (!sdkReady || !sdkDeviceId || !spotifyAccessToken || !sdkPlayerRef.current) &&
+        retries < 5
+      ) {
+        console.warn("Esperando que el SDK esté listo antes de reproducir...");
+        await new Promise((res) => setTimeout(res, 1000));
+        retries++;
+      }
+
+      if (!sdkPlayerRef.current || !sdkReady) {
+        console.error("El SDK no estuvo listo a tiempo. Cancelando reproducción.");
+        toast({
+          title: 'Error de Reproducción',
+          description: 'No se pudo reproducir la siguiente canción. El reproductor no está listo.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       try {
-        const trackUri = `spotify:track:${nextSong.spotifyTrackId}`;
-        await sdkPlayerRef.current.playUri(trackUri); // Ajustado para usar solo uri
+        await sdkPlayerRef.current.playUri(trackUri);
         toast({
           title: '🎵 Reproduciendo siguiente canción',
           description: `Ahora suena: ${nextSong.title}`,
@@ -308,13 +328,6 @@ export default function AdminPage() {
         console.error('Error al reproducir la siguiente canción con el SDK:', error);
         toast({ title: 'Error de Reproducción', description: `No se pudo reproducir ${nextSong.title}.`, variant: 'destructive' });
       }
-    } else if (queue.length > 0 && (!sdkReady || !sdkDeviceId || !spotifyAccessToken || !sdkPlayerRef.current)) {
-      console.warn("Skipping next song playback: SDK not ready or missing info.", {
-        sdkReady,
-        sdkDeviceId,
-        spotifyAccessToken: !!spotifyAccessToken,
-        sdkPlayerRef: !!sdkPlayerRef.current,
-      });
     } else {
       console.log('La cola está vacía o el reproductor no está listo. No hay siguiente canción para reproducir.');
       if (sdkPlayerRef.current) {
@@ -571,8 +584,8 @@ export default function AdminPage() {
           ref={sdkPlayerRef}
           accessToken={spotifyAccessToken}
           onStateChange={setSdkPlaybackState}
-          onTrackEnd={handleTrackEndNotification}
-          onReady={(deviceId) => {
+ onTrackEnd={(trackId: string | null) => handleTrackEndNotification(trackId)}
+          onReady={(deviceId: string) => {
             setSdkReady(true);
             setSdkDeviceId(deviceId);
           }}
@@ -854,42 +867,12 @@ export default function AdminPage() {
                 if (!isConfirmed) return;
 
                 toast({ title: "⏳ Forzando sincronización...", description: "Intentando reproducir la siguiente canción." });
-                try {
-                  const res = await fetch('/api/spotify/sync', { method: 'POST' });
-                  const json = await res.json();
-                  if (json.success || json.played) {
-                    toast({
-                      title: '🎵 Sincronización Forzada Exitosa',
-                      description: `Ahora suena: ${json.played?.title || 'siguiente en cola'}.`,
-                    });
-                  } else if (json.message) {
-                    toast({
-                      title: 'ℹ️ Sincronización Forzada',
-                      description: json.message,
-                      variant: json.message === 'Queue is empty' ? 'default' : 'destructive',
-                    });
-                  } else if (json.warning) {
-                    toast({
-                      title: '⚠️ Advertencia Sincronización',
-                      description: json.warning,
-                      variant: 'default',
-                    });
-                  } else {
-                    toast({
-                      title: '⚠️ No se pudo forzar',
-                      description: json.error || 'Respuesta desconocida del servidor.',
-                      variant: 'destructive',
-                    });
-                  }
-                  mutateCurrentPlaying();
-                } catch (e: any) {
-                  console.error('Error forzando sincronización:', e);
-                  toast({
-                    title: '❌ Error de Red',
-                    description: 'No se pudo conectar con el servidor para forzar la sincronización.',
-                    variant: 'destructive',
-                  });
-                }
+                await handleTrackEndNotification(null);
+                toast({
+                  title: '🎵 Reproducción Forzada',
+                  description: 'Se intentó reproducir la siguiente canción desde el SDK del navegador.',
+                });
+                mutateCurrentPlaying();
               }}
             >
               <RefreshCw className="mr-2 h-4 w-4" /> Forzar Sincronización

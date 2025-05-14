@@ -1,6 +1,14 @@
-'use client';
+import 'react'; // Keep this import
 
-import React, { useEffect, useState, useImperativeHandle, forwardRef, useRef } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useImperativeHandle,
+  forwardRef,
+  useRef,
+  ForwardedRef
+} from 'react';
+
 import { useToast } from '@/hooks/use-toast';
 
 interface SpotifyPlaybackSDKProps {
@@ -28,7 +36,7 @@ export interface SpotifyPlaybackSDKRef {
 }
 
 const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKProps>(
-  ({ accessToken, onStateChange, onTrackEnd, onReady }, ref) => {
+  ({ accessToken, onStateChange, onTrackEnd, onReady }, ref: ForwardedRef<SpotifyPlaybackSDKRef>) => {
     const { toast } = useToast();
     const [player, setPlayer] = useState<any>(null);
     const [isReady, setIsReady] = useState(false);
@@ -160,141 +168,152 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
           onStateChange?.(null);
         });
 
-          spotifyPlayer.addListener('player_state_changed', (state: any) => {
-            console.log('Estado del reproductor cambió:', state);
-            setCurrentPlaybackState(state);
-            onStateChange?.(state);
+        spotifyPlayer.addListener('player_state_changed', (state: any) => {
+          console.log('Estado del reproductor cambió:', state);
+          setCurrentPlaybackState(state);
+          onStateChange?.(state);
 
-            if (state && !state.paused && state.track_window.current_track) {
-              const track = state.track_window.current_track;
-              const position = state.position;
-              const duration = track.duration_ms;
-              const threshold = 2000; 
-              const remaining = duration - position;
+          if (state && !state.paused && state.track_window.current_track) {
+            const track = state.track_window.current_track;
+            const position = state.position;
+            const duration = track.duration_ms;
+            const threshold = 2000; 
+            const remaining = duration - position;
 
-              if (remaining < threshold && !notificationLock.current) {
-                console.log(`Canción por terminar (quedan ${remaining}ms). Notificando...`);
-                notificationLock.current = true;
+            if (remaining < threshold && !notificationLock.current) {
+              console.log(`Canción por terminar (quedan ${remaining}ms). Notificando...`);
+              notificationLock.current = true;
 
-                // Pasa el ID de la canción que está terminando (la actual)
-                // O, para ser más precisos sobre la que *terminó*, la primera en previous_tracks
-                const endedTrackId = state.track_window?.previous_tracks?.[0]?.id || state.track_window?.current_track?.id || null;
-                onTrackEnd?.(endedTrackId);
+              // Pasa el ID de la canción que está terminando (la actual)
+              // O, para ser más precisos sobre la que *terminó*, la primera en previous_tracks
+              const endedTrackId = state.track_window?.previous_tracks?.[0]?.id || state.track_window?.current_track?.id || null;
+              onTrackEnd?.(endedTrackId);
 
-                setTimeout(() => { notificationLock.current = false; }, 5000); 
-              }
-            } else if (state && state.paused && state.position === 0 && currentPlaybackState && !currentPlaybackState.paused) {
-              console.log('Canción parece haber terminado (estado pausado en 0). Notificando...');
-              if (!notificationLock.current) {
-                notificationLock.current = true;
-                // Pasa el ID de la canción que estaba sonando antes de pausar en 0
-                const endedTrackId = currentPlaybackState.track_window?.current_track?.id || state.track_window?.previous_tracks?.[0]?.id || null;
-                onTrackEnd?.(endedTrackId);
-                setTimeout(() => { notificationLock.current = false; }, 5000);
-              }
+              setTimeout(() => { notificationLock.current = false; }, 5000); 
             }
-
-            if (currentPlaybackState && state && state.track_window.current_track.id !== currentPlaybackState.track_window.current_track.id) {
-              console.log("Cambio de canción detectado, restableciendo notificationLock.");
-              notificationLock.current = false;
+          } else if (state && state.paused && state.position === 0 && currentPlaybackState && !currentPlaybackState.paused) {
+            console.log('Canción parece haber terminado (estado pausado en 0). Notificando...');
+            if (!notificationLock.current) {
+              notificationLock.current = true;
+              // Pasa el ID de la canción que estaba sonando antes de pausar en 0
+              const endedTrackId = currentPlaybackState.track_window?.current_track?.id || state.track_window?.previous_tracks?.[0]?.id || null;
+              onTrackEnd?.(endedTrackId);
+              setTimeout(() => { notificationLock.current = false; }, 5000);
             }
-          });
+          }
 
+          // Nueva detección reforzada de final de canción
+          if (
+            state &&
+            state.paused &&
+            state.position === 0 &&
+            !state.track_window?.next_tracks?.length &&
+            !notificationLock.current
+          ) {
+            console.log('Detección reforzada: la canción terminó y no hay siguiente pista.');
+            notificationLock.current = true;
+            const endedTrackId = state.track_window?.current_track?.id || null;
+            onTrackEnd?.(endedTrackId);
+            setTimeout(() => { notificationLock.current = false; }, 5000);
+          }
 
-          spotifyPlayer.addListener('authentication_error', ({ message }: { message: string }) => {
-            console.error('Error de autenticación del SDK:', message);
-            toast({
-              title: 'Error de Autenticación Spotify',
-              description: `Token inválido: ${message}. Intentando refrescar...`,
-              variant: 'destructive'
-            });
-            setIsReady(false);
-            setCurrentPlaybackState(null);
-            onStateChange?.(null);
-          });
+          if (currentPlaybackState && state && state.track_window.current_track.id !== currentPlaybackState.track_window.current_track.id) {
+            console.log("Cambio de canción detectado, restableciendo notificationLock.");
+            notificationLock.current = false;
+          }
+        });
 
-          spotifyPlayer.addListener('account_error', ({ message }: { message: string }) => {
-            console.error('Error de cuenta del SDK:', message);
-            toast({
-              title: 'Error de Cuenta Spotify',
-              description: `Problema con la cuenta: ${message}.`,
-              variant: 'destructive'
-            });
-            setIsReady(false);
-            setCurrentPlaybackState(null);
-            onStateChange?.(null);
+        spotifyPlayer.addListener('authentication_error', ({ message }: { message: string }) => {
+          console.error('Error de autenticación del SDK:', message);
+          toast({
+            title: 'Error de Autenticación Spotify',
+            description: `Token inválido: ${message}. Intentando refrescar...`,
+            variant: 'destructive'
           });
+          setIsReady(false);
+          setCurrentPlaybackState(null);
+          onStateChange?.(null);
+        });
 
-          spotifyPlayer.addListener('playback_error', ({ message }: { message: string }) => {
-            console.error('Error de reproducción del SDK:', message);
-            toast({
-              title: 'Error de Reproducción Spotify',
-              description: `Problema al reproducir: ${message}.`,
-              variant: 'destructive'
-            });
+        spotifyPlayer.addListener('account_error', ({ message }: { message: string }) => {
+          console.error('Error de cuenta del SDK:', message);
+          toast({
+            title: 'Error de Cuenta Spotify',
+            description: `Problema con la cuenta: ${message}.`,
+            variant: 'destructive'
           });
+          setIsReady(false);
+          setCurrentPlaybackState(null);
+          onStateChange?.(null);
+        });
 
-          // Conectar el reproductor
-          spotifyPlayer.connect().then((success: boolean) => {
-             if (success) {
-                 console.log("Reproductor Spotify conectado.");
-             } else {
-                 console.log("Reproductor Spotify no pudo conectarse.");
-             }
+        spotifyPlayer.addListener('playback_error', ({ message }: { message: string }) => {
+          console.error('Error de reproducción del SDK:', message);
+          toast({
+            title: 'Error de Reproducción Spotify',
+            description: `Problema al reproducir: ${message}.`,
+            variant: 'destructive'
           });
-          setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
+        });
+
+        // Conectar el reproductor
+        spotifyPlayer.connect().then((success: boolean) => {
+           if (success) {
+               console.log("Reproductor Spotify conectado.");
+           } else {
+               console.log("Reproductor Spotify no pudo conectarse.");
+           }
+        });
+        setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
       };
+ window.onSpotifyWebPlaybackSDKReady = initializePlayer;
 
-      // Asigna la función de inicialización a window.onSpotifyWebPlaybackSDKReady
-      window.onSpotifyWebPlaybackSDKReady = initializePlayer;
-
-      // Carga el script del SDK si no está ya cargado
-      if (!document.getElementById('spotify-sdk')) {
+      // Añade el script del SDK si no está ya presente
+      if (!document.getElementById('spotify-playback-sdk')) {
         const script = document.createElement('script');
-        script.id = 'spotify-sdk';
-        script.src = 'https://sdk.scdn.co/spotify-player.js';
-        script.async = true;
-        document.body.appendChild(script);
-        scriptAdded = true;
-        console.log("Script del Spotify Web Playback SDK añadido dinámicamente.");
+script.id = 'spotify-playback-sdk';
+script.src = 'https://sdk.scdn.co/spotify-player.js';
+script.async = true;
+document.body.appendChild(script);
+scriptAdded = true;
+console.log("Script del Spotify Web Playback SDK añadido dinámicamente.");
       } else {
-         console.log("Script del Spotify Web Playback SDK ya presente.");
-         // Si el script ya está presente, pero el reproductor no se ha inicializado (por ejemplo, en una re-renderización)
-         // podemos intentar llamar initializePlayer directamente si el SDK ya está listo.
-         if (window.Spotify && !player) {
-              console.log("SDK ya presente y listo. Inicializando reproductor inmediatamente.");
-              initializePlayer();
-         }
+        console.log("Script del Spotify Web Playback SDK ya presente.");
+        if (window.Spotify && !player) {
+          console.log("SDK ya presente y listo. Inicializando reproductor inmediatamente.");
+          initializePlayer();
+        }
       }
 
       // Función de limpieza
       return () => {
         console.log('Ejecutando cleanup para SpotifyPlaybackSDK...');
-        // Desconectar el reproductor si existe
         if (player) {
           console.log('Desconectando reproductor Spotify...');
           player.disconnect();
         }
-        // Restablecer la función onSpotifyWebPlaybackSDKReady para evitar duplicados
-        if (window.onSpotifyWebPlaybackSDKReady === initializePlayer) {
-            window.onSpotifyWebPlaybackSDKReady = () => { console.log('SDK ready (placeholder) - previous component unmounted'); };
-        }
-        // Remover el script si fue añadido por este componente
-        if (scriptAdded) {
-            const scriptElement = document.getElementById('spotify-sdk');
-            if (scriptElement) {
-                scriptElement.remove();
-                console.log("Script del Spotify Web Playback SDK removido.");
-            }
-        }
-      }
 
+        if (window.onSpotifyWebPlaybackSDKReady === initializePlayer) {
+          window.onSpotifyWebPlaybackSDKReady = () => {
+            console.log('SDK ready (placeholder) - previous component unmounted');
+          };
+        }
+
+        if (scriptAdded) {
+          const scriptElement = document.getElementById('spotify-playback-sdk');
+          if (scriptElement) {
+            scriptElement.remove();
+            console.log("Script del Spotify Web Playback SDK removido.");
+          }
+        }
+      };
     }, [accessToken, toast, onStateChange, onTrackEnd, onReady, player]);
 
     return null;
   }
 );
 
-SpotifyPlaybackSDK.displayName = 'SpotifyPlaybackSDK'; 
+SpotifyPlaybackSDK.displayName = 'SpotifyPlaybackSDK';
 
-export default SpotifyPlaybackSDK;
+export { SpotifyPlaybackSDK };
+
