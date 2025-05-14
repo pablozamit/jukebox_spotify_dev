@@ -97,13 +97,17 @@ async function getActiveDeviceId(accessToken: string): Promise<string> {
 
 async function playTrack(accessToken: string, deviceId: string, trackId: string): Promise<void> {
   console.log(`playTrack: Attempting to play track ${trackId} on device ${deviceId}.`);
-  console.log('playTrack: Calling Spotify API /me/player/play.');
-  const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
-  const headers = { Authorization: `Bearer ${accessToken}` };
-  const body = { uris: [`spotify:track:${trackId}`] };
-
-  await axios.put(url, body, { headers });
-  console.log(`Attempted to play track ${trackId} on device ${deviceId}`);
+  try {
+    console.log("playTrack: Calling Spotify API /me/player/play.");
+    const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    const body = { uris: [`spotify:track:${trackId}`] };
+    await axios.put(url, body, { headers });
+    console.log(`Attempted to play track ${trackId} on device ${deviceId}`);
+  } catch (error: any) {
+    console.error("❌ Error in playTrack:", error.message, error.stack);
+    throw error;
+  }
 }
 
 async function getNextTrack(db: admin.database.Database): Promise<any | null> {
@@ -180,7 +184,7 @@ export const checkAndPlayNextTrack = onSchedule({ schedule: "every 8 seconds", t
     }
 
     const remainingMs = playerState.duration_ms - playerState.progress_ms;
-    const estimatedLatency = 1000; // Ajusta este valor según pruebas reales
+    const estimatedLatency = 300; // Ajusta este valor según pruebas reales
 
     if (remainingMs <= 3000) {
       const delay = remainingMs - estimatedLatency;
