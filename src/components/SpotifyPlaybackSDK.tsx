@@ -25,7 +25,7 @@ interface SpotifyPlaybackSDKProps {
 declare global {
   interface Window {
     Spotify: any;
-    onSpotifyWebPlaybackSDKReady: () => void;
+    onSpotifyWebPlaybackSDKReady?: () => void; // Marcar como opcional
   }
 }
 
@@ -115,7 +115,7 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
 
       if (!accessToken) {
         console.log("No access token, desconectando reproductor si existe.");
-        if (player) {
+        if (player && player.disconnect) {
           player.disconnect();
         }
         setPlayer(null);
@@ -280,9 +280,14 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
         });
         setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
       };
-      console.log('[SDK] Definiendo window.onSpotifyWebPlaybackSDKReady');
-window.onSpotifyWebPlaybackSDKReady = () => initializePlayer();
 
+      console.log('[SDK] Definiendo window.onSpotifyWebPlaybackSDKReady');
+      if (typeof window.onSpotifyWebPlaybackSDKReady !== 'function') {
+        window.onSpotifyWebPlaybackSDKReady = () => initializePlayer();
+      } else {
+        console.warn('[SDK] onSpotifyWebPlaybackSDKReady ya está definida. No se sobrescribe.');
+        initializePlayer(); // Ejecutar directamente si ya está disponible
+      }
 
       // Añade el script del SDK si no está ya presente
       if (!document.getElementById('spotify-playback-sdk')) {
@@ -304,15 +309,14 @@ window.onSpotifyWebPlaybackSDKReady = () => initializePlayer();
       // Función de limpieza
       return () => {
         console.log('Ejecutando cleanup para SpotifyPlaybackSDK...');
-        if (player) {
+        if (player && player.disconnect) {
           console.log('Desconectando reproductor Spotify...');
           player.disconnect();
         }
 
-        if (window.onSpotifyWebPlaybackSDKReady === initializePlayer) {
-          window.onSpotifyWebPlaybackSDKReady = () => {
-            console.log('SDK ready (placeholder) - previous component unmounted');
-          };
+        if (typeof window !== 'undefined' && window.onSpotifyWebPlaybackSDKReady) {
+          window.onSpotifyWebPlaybackSDKReady = undefined; // Usar undefined en lugar de delete
+          console.log('Limpiado onSpotifyWebPlaybackSDKReady');
         }
 
         if (scriptAdded) {
