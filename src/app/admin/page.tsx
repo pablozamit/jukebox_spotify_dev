@@ -1,4 +1,4 @@
-tsx
+
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -576,6 +576,7 @@ export default function AdminPage() {
                     width={64}
                     height={64}
                     className="rounded-md shadow-md"
+                    data-ai-hint="song album"
                   />
                   <div className="flex-1 overflow-hidden">
                     <p className="font-semibold truncate">{sdkPlaybackState.track_window.current_track.name}</p>
@@ -818,6 +819,10 @@ export default function AdminPage() {
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-2 pt-4 border-t">
+            <Button variant="outline" disabled className="w-full opacity-80 cursor-default">
+  🗳️ Modo Votos: Off
+</Button>
+
               <Button variant="outline" onClick={() => router.push('/')} className="w-full">
                 <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
               </Button>
@@ -856,7 +861,7 @@ export default function AdminPage() {
           </Card>
         </div>
       </div>
-      <footer className="w-full text-center text-gray-500 text-sm p-4 mt-auto">
+      <footer className="w-full text-center text-muted-foreground text-sm p-4 mt-auto">
         Version: {process.env.NEXT_PUBLIC_APP_VERSION}
       </footer>
     </div>
