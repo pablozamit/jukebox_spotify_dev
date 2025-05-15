@@ -267,11 +267,13 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
       setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
     };
 
-    // Definir la función global ANTES de que Spotify la busque
-    window.onSpotifyWebPlaybackSDKReady = () => {
-      console.log('[SDK] Callback global onSpotifyWebPlaybackSDKReady ejecutado');
-      initializePlayer();
-    };
+        // Definir la función global ANTES de que Spotify la busque
+        window.onSpotifyWebPlaybackSDKReady = () => {
+          console.log('[SDK] Callback global onSpotifyWebPlaybackSDKReady ejecutado');
+          window.__spotifySDK_ready_called = true;
+          initializePlayer();
+        };
+    
 
     useEffect(() => {
       let scriptAdded = false;
@@ -289,6 +291,12 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
       }
 
       console.log('[SDK] Definiendo window.onSpotifyWebPlaybackSDKReady');
+
+      if (window.__spotifySDK_ready_called && typeof window.Spotify !== 'undefined') {
+        console.warn('[SDK] Spotify ya llamó a onSpotifyWebPlaybackSDKReady. Inicializando ahora...');
+        initializePlayer();
+      }
+
 
       // Añade el script del SDK si no está ya presente
       if (!document.getElementById('spotify-playback-sdk')) {
