@@ -144,12 +144,23 @@ export async function POST() {
 
     // Procedemos a añadir la canción a la cola si queda poco tiempo
     const trackUri = `spotify:track:${nextQueueSong.spotifyTrackId}`;
-    try {
-      await enqueueTrack(accessToken, trackUri, deviceId);
-      await db.ref(`/queue/${nextQueueSong.id}`).remove();
-      console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
-      return NextResponse.json({ success: true, enqueued: nextQueueSong });
-    } catch (err: any) {
+const enqueuedKey = `/admin/spotify/enqueuedTracks/${nextQueueSong.id}`;
+
+const alreadyEnqueuedSnap = await db.ref(enqueuedKey).once('value');
+if (alreadyEnqueuedSnap.exists()) {
+  console.log(`DEBUG: Canción ${nextQueueSong.id} ya encolada anteriormente. Se omite.`);
+  return NextResponse.json({ message: 'Track already enqueued recently' });
+}
+
+try {
+  await enqueueTrack(accessToken, trackUri, deviceId);
+  await db.ref(`/queue/${nextQueueSong.id}`).remove();
+  await db.ref(enqueuedKey).set({ timestamp: Date.now() });
+
+  console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
+  return NextResponse.json({ success: true, enqueued: nextQueueSong });
+} catch (err: any) {
+
       await logError(err.response?.data || err.message || 'Error encolando canción en Spotify');
       console.error("DEBUG: Error encolando canción:", err);
       return NextResponse.json({ error: 'Error encolando canción: ' + err.message }, { status: 500 });
