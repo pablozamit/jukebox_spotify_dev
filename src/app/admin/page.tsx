@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -91,30 +90,49 @@ export default function AdminPage() {
 
   useEffect(() => {
     const interval = setInterval(async () => {
+      // Llama al endpoint de sincronización PERIÓDICAMENTE
+      try {
+        console.log('[Jukebox] Llamando a /api/spotify/sync periódicamente...');
+        const syncRes = await fetch('/api/spotify/sync', { method: 'POST' });
+        const syncJson = await syncRes.json();
+        if (!syncRes.ok) {
+          console.error('[Jukebox] Error en llamada periódica a /api/spotify/sync:', syncJson.error);
+          toast({ title: 'Error de sincronización', description: syncJson.error || 'No se pudo sincronizar con Spotify.', variant: 'destructive' });
+        } else {
+          console.log('[Jukebox] /api/spotify/sync response:', syncJson);
+          // Refresca la información de "Ahora Suena" después de un sync exitoso
+          mutateCurrentPlaying();
+        }
+      } catch (error) {
+        console.error('[Jukebox] Error en fetch periódico a /api/spotify/sync:', error);
+        toast({ title: 'Error de red', description: 'No se pudo conectar con el servidor de sincronización.', variant: 'destructive' });
+      }
+
+      // --- Lógica original mantenida como fallback, pero comentada ---
+      /*
       const progressMs = currentPlaying?.progress_ms;
       const durationMs = currentPlaying?.item?.duration_ms;
       const currentTrackId = currentPlaying?.item?.id;
-  
+
       if (!progressMs || !durationMs || !currentTrackId || queue.length === 0) return;
-  
+
       const remaining = durationMs - progressMs;
       if (remaining <= 8000) {
-        console.log(`[Jukebox] Quedan ${remaining}ms para que termine ${currentTrackId}`);
-  
+        console.log(`[Jukebox] (Frontend Detector) Quedan ${remaining}ms para que termine ${currentTrackId}`);
         const firstInQueue = queue[0];
         if (!firstInQueue) return;
-  
+
         try {
           const res = await fetch('/api/spotify/add-to-queue', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ trackUri: `spotify:track:${firstInQueue.spotifyTrackId}` }),
           });
-  
+
           if (!res.ok) throw new Error('No se pudo añadir la canción a la cola de Spotify');
-  
+
           console.log(`[Jukebox] Añadida a Spotify Queue: ${firstInQueue.title}`);
-  
+
           // ELIMINAR la canción que acaba de empezar a sonar de la cola Firebase
           if (!db) {
             console.error('Firebase database no está inicializado');
@@ -124,17 +142,16 @@ export default function AdminPage() {
           await remove(songRef);
           
           console.log(`[Jukebox] Eliminada de Firebase Queue: ${firstInQueue.title}`);
-  
+
         } catch (err) {
           console.error('Error añadiendo canción a la cola de Spotify o eliminándola de Firebase:', err);
         }
       }
-    }, 5000);
-  
-    return () => clearInterval(interval);
-  }, [currentPlaying, queue]);
-  
+      */
+    }, 5000); // Intervalo de 5 segundos
 
+    return () => clearInterval(interval);
+  }, [currentPlaying, queue, mutateCurrentPlaying, toast, db]);
 
   // Authentication Check
   useEffect(() => {
@@ -344,7 +361,7 @@ export default function AdminPage() {
       }
 
       try {
-        // Notificar al backend para transferir la reproducción (sin depender del SDK directamente aquí)
+        // Notificar al backend para transferir la reproducción
         await fetch('/api/spotify/transfer-playback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -364,7 +381,7 @@ export default function AdminPage() {
       toast({ title: 'Cola vacía', description: 'La cola de reproducción ha terminado.' });
     }
 
-    // Mutar SWR para actualizar "Ahora Suena" si no usamos sdkPlaybackState
+    // Mutar SWR para actualizar "Ahora Suena"
     mutateCurrentPlaying();
   };
 
@@ -599,13 +616,8 @@ export default function AdminPage() {
     return null;
   }
 
-
-
-
   return (
     <div className="container mx-auto p-4 flex flex-col min-h-screen">
-      {/* Spotify Playback SDK Integration */}
-
       <div className="flex flex-col md:flex-row gap-6 flex-1">
         {/* Columna principal */}
         <div className="flex-1 space-y-6">
@@ -617,24 +629,23 @@ export default function AdminPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-            {currentPlaying && currentPlaying.title ? (
-  <div className="flex gap-4 items-center">
-    <Image
-      src={currentPlaying.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.spotifyTrackId}/64`}
-      alt={currentPlaying.title}
-      width={64}
-      height={64}
-      className="rounded-md shadow-md"
-    />
-    <div className="flex-1 overflow-hidden">
-      <p className="font-semibold truncate">{currentPlaying.title}</p>
-      <p className="text-sm text-muted-foreground truncate">{currentPlaying.artist}</p>
-    </div>
-  </div>
-) : (
-  <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
-)}
-
+              {currentPlaying && currentPlaying.title ? (
+                <div className="flex gap-4 items-center">
+                  <Image
+                    src={currentPlaying.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.spotifyTrackId}/64`}
+                    alt={currentPlaying.title}
+                    width={64}
+                    height={64}
+                    className="rounded-md shadow-md"
+                  />
+                  <div className="flex-1 overflow-hidden">
+                    <p className="font-semibold truncate">{currentPlaying.title}</p>
+                    <p className="text-sm text-muted-foreground truncate">{currentPlaying.artist}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
+              )}
             </CardContent>
           </Card>
 
@@ -868,9 +879,9 @@ export default function AdminPage() {
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-2 pt-4 border-t">
-            <Button variant="outline" disabled className="w-full opacity-80 cursor-default">
-  🗳️ Modo Votos: Off
-</Button>
+              <Button variant="outline" disabled className="w-full opacity-80 cursor-default">
+                🗳️ Modo Votos: Off
+              </Button>
 
               <Button variant="outline" onClick={() => router.push('/')} className="w-full">
                 <Home className="mr-2 h-4 w-4" /> Ir al Jukebox

@@ -144,33 +144,35 @@ export async function POST() {
 
     // Procedemos a añadir la canción a la cola si queda poco tiempo
     const trackUri = `spotify:track:${nextQueueSong.spotifyTrackId}`;
-const enqueuedKey = `/admin/spotify/enqueuedTracks/${nextQueueSong.id}`;
+    const enqueuedKey = `/admin/spotify/enqueuedTracks/${nextQueueSong.id}`;
 
-const alreadyEnqueuedSnap = await db.ref(enqueuedKey).once('value');
-if (alreadyEnqueuedSnap.exists()) {
-  const timeSince = Date.now() - alreadyEnqueuedSnap.val().timestamp;
-  if (timeSince < 60_000) {
-    console.log(`DEBUG: Canción ${nextQueueSong.id} ya fue marcada como encolada hace ${timeSince} ms. Se omite.`);
-    return NextResponse.json({ message: 'Track already enqueued recently' });
-  } else {
-    console.warn(`DEBUG: Entrada encolada antigua. Reintentando encolar canción: ${nextQueueSong.id}`);
-  }
-}
+    const alreadyEnqueuedSnap = await db.ref(enqueuedKey).once('value');
+    if (alreadyEnqueuedSnap.exists()) {
+      const timeSince = Date.now() - alreadyEnqueuedSnap.val().timestamp;
+      if (timeSince < 60_000) {
+        console.log(`DEBUG: Canción ${nextQueueSong.id} ya fue marcada como encolada hace ${timeSince} ms. Se omite.`);
+        return NextResponse.json({ message: 'Track already enqueued recently' });
+      } else {
+        console.warn(`DEBUG: Entrada encolada antigua. Reintentando encolar canción: ${nextQueueSong.id}`);
+      }
+    }
 
-await enqueueTrack(accessToken, trackUri, deviceId);
+    await enqueueTrack(accessToken, trackUri, deviceId);
+    
+    // Línea añadida para eliminar la canción de la cola de Firebase
+    await db.ref(`/queue/${nextQueueSong.id}`).remove();
 
-await db.ref(enqueuedKey).set({
-  timestamp: Date.now(),
-  trackId: nextQueueSong.id,
-});
+    await db.ref(enqueuedKey).set({
+      timestamp: Date.now(),
+      trackId: nextQueueSong.id,
+    });
 
-await db.ref('/admin/spotify/nowPlayingId').set({
-  id: nextQueueSong.spotifyTrackId,
-  timestamp: Date.now(),
-});
+    await db.ref('/admin/spotify/nowPlayingId').set({
+      id: nextQueueSong.spotifyTrackId,
+      timestamp: Date.now(),
+    });
 
-
-console.log(`DEBUG: Canción añadida a cola Spotify (NO eliminada aún): ${nextQueueSong.spotifyTrackId}`);
+    console.log(`DEBUG: Canción añadida a cola Spotify Y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
     return NextResponse.json({ success: true, enqueued: nextQueueSong });
 
   } catch (err: any) {
