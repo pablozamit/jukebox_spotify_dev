@@ -153,9 +153,17 @@ if (alreadyEnqueuedSnap.exists()) {
 }
 
 try {
+  await db.ref(`/queue/${nextQueueSong.id}`).transaction((current) => {
+    if (current === null) {
+      console.log("DEBUG: La canción ya fue eliminada por otra instancia.");
+      return; // otro proceso la eliminó antes
+    }
+    return null; // marcar para eliminación
+  });
+  
   await enqueueTrack(accessToken, trackUri, deviceId);
-  await db.ref(`/queue/${nextQueueSong.id}`).remove();
   await db.ref(enqueuedKey).set({ timestamp: Date.now() });
+  
 
   console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
   return NextResponse.json({ success: true, enqueued: nextQueueSong });
