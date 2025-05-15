@@ -280,7 +280,9 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
         });
         setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
       };
-      window.onSpotifyWebPlaybackSDKReady = initializePlayer;
+      console.log('[SDK] Definiendo window.onSpotifyWebPlaybackSDKReady');
+window.onSpotifyWebPlaybackSDKReady = () => initializePlayer();
+
 
       // Añade el script del SDK si no está ya presente
       if (!document.getElementById('spotify-playback-sdk')) {
