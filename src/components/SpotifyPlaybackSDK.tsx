@@ -1,3 +1,4 @@
+import '@/lib/setupSpotifySDK'; // Esto debe ir arriba del todo, antes de cualquier uso del SDK
 import 'react'; // Keep this import
 
 import React, {
