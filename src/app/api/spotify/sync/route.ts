@@ -157,44 +157,22 @@ if (alreadyEnqueuedSnap.exists()) {
   }
 }
 
-try {
-  await enqueueTrack(accessToken, trackUri, deviceId);
-  await db.ref(enqueuedKey).set({
-    timestamp: Date.now(),
-    trackId: nextQueueSong.id,
-  });
-  
-  console.log(`DEBUG: Canción añadida a cola Spotify (NO eliminada aún): ${nextQueueSong.spotifyTrackId}`);
-  return NextResponse.json({ success: true, enqueued: nextQueueSong });
-  
-} catch (err: any) {
-  await logError(err.response?.data || err.message || 'Error encolando canción en Spotify');
-  console.error("DEBUG: Error encolando canción:", err);
-  return NextResponse.json({ error: 'Error encolando canción: ' + err.message }, { status: 500 });
-}
+await enqueueTrack(accessToken, trackUri, deviceId);
+
+await db.ref(enqueuedKey).set({
+  timestamp: Date.now(),
+  trackId: nextQueueSong.id,
+});
+
+await db.ref('/admin/spotify/nowPlayingId').set({
+  id: nextQueueSong.spotifyTrackId,
+  timestamp: Date.now(),
+});
 
 
-try {
-  await db.ref(`/queue/${nextQueueSong.id}`).transaction((current) => {
-    if (current === null) {
-      console.log("DEBUG: La canción ya fue eliminada por otra instancia.");
-      return; // otro proceso la eliminó antes
-    }
-    return null; // marcar para eliminación
-  });
-  
-  await enqueueTrack(accessToken, trackUri, deviceId);
-  await db.ref(enqueuedKey).set({ timestamp: Date.now() });
-  
+console.log(`DEBUG: Canción añadida a cola Spotify (NO eliminada aún): ${nextQueueSong.spotifyTrackId}`);
+    return NextResponse.json({ success: true, enqueued: nextQueueSong });
 
-  console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
-  return NextResponse.json({ success: true, enqueued: nextQueueSong });
-} catch (err: any) {
-
-      await logError(err.response?.data || err.message || 'Error encolando canción en Spotify');
-      console.error("DEBUG: Error encolando canción:", err);
-      return NextResponse.json({ error: 'Error encolando canción: ' + err.message }, { status: 500 });
-    }
   } catch (err: any) {
     await logError(err.response?.data || err.message || 'Unknown error in sync');
     console.error("DEBUG: Error en sincronización:", err);

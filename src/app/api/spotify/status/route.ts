@@ -73,6 +73,14 @@ export async function GET() {
 
     const data = test.data || {};
     const activeDevice = data.device || null;
+    const currentTrackId = data?.item?.id;
+
+    if (currentTrackId) {
+      await db.ref('/admin/spotify/nowPlayingId').set({
+        id: currentTrackId,
+        timestamp: Date.now(),
+      });
+    }
 
     return NextResponse.json({
       spotifyConnected: true,
