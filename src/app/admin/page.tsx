@@ -297,16 +297,25 @@ export default function AdminPage() {
 
     if (nextSong) {
       const trackUri = `spotify:track:${nextSong.spotifyTrackId}`;
-
-      let retries = 0;
-      while (
-        (!sdkReady || !sdkDeviceId || !spotifyAccessToken || !sdkPlayerRef.current) &&
-        retries < 5
-      ) {
-        console.warn("Esperando que el SDK esté listo antes de reproducir...");
-        await new Promise((res) => setTimeout(res, 1000));
-        retries++;
+      if (!trackUri || !trackUri.startsWith('spotify:track:')) {
+        toast({
+          title: 'Error en URI',
+          description: 'La URI de la siguiente canción no es válida.',
+          variant: 'destructive',
+        });
+        return;
       }
+      let retries = 0;
+const maxRetries = 15; // Aumentamos el tiempo de espera total a 15s
+while (
+  (!sdkReady || !sdkDeviceId || !spotifyAccessToken || !sdkPlayerRef.current) &&
+  retries < maxRetries
+) {
+  console.warn(`[Sync Retry] Esperando SDK: intento ${retries + 1}/${maxRetries}`);
+  await new Promise((res) => setTimeout(res, 1000));
+  retries++;
+}
+
 
       if (!sdkPlayerRef.current || !sdkReady) {
         console.error("El SDK no estuvo listo a tiempo. Cancelando reproducción.");
@@ -320,6 +329,13 @@ export default function AdminPage() {
 
       try {
         await sdkPlayerRef.current.playUri(trackUri);
+        // Forzar que el control del playback pase al dispositivo del SDK
+await fetch('/api/spotify/transfer-playback', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ device_id: sdkDeviceId }),
+});
+
         toast({
           title: '🎵 Reproduciendo siguiente canción',
           description: `Ahora suena: ${nextSong.title}`,
