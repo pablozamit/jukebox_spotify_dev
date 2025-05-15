@@ -1,3 +1,4 @@
+tsx
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -553,308 +554,309 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6 min-h-screen">
+    <div className="container mx-auto p-4 flex flex-col min-h-screen">
       {/* Spotify Playback SDK Integration */}
 
-      {/* Columna principal */}
-      <div className="flex-1 space-y-6">
-        {/* ── Ahora Suena ── */}
-        <Card className="shadow-lg rounded-lg border border-border/70">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-              <Music className="h-5 w-5" /> Ahora Suena
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {sdkPlaybackState && sdkPlaybackState.track_window && sdkPlaybackState.track_window.current_track ? (
-              <div className="flex gap-4 items-center">
-                <Image
-                  src={sdkPlaybackState.track_window.current_track.album.images[0]?.url || `https://picsum.photos/seed/${sdkPlaybackState.track_window.current_track.id}/64`}
-                  alt={sdkPlaybackState.track_window.current_track.name}
-                  width={64}
-                  height={64}
-                  className="rounded-md shadow-md"
-                />
-                <div className="flex-1 overflow-hidden">
-                  <p className="font-semibold truncate">{sdkPlaybackState.track_window.current_track.name}</p>
-                  <p className="text-sm text-muted-foreground truncate">{sdkPlaybackState.track_window.current_track.artists.map((a: any) => a.name).join(', ')}</p>
+      <div className="flex flex-col md:flex-row gap-6 flex-1">
+        {/* Columna principal */}
+        <div className="flex-1 space-y-6">
+          {/* ── Ahora Suena ── */}
+          <Card className="shadow-lg rounded-lg border border-border/70">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+                <Music className="h-5 w-5" /> Ahora Suena
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {sdkPlaybackState && sdkPlaybackState.track_window && sdkPlaybackState.track_window.current_track ? (
+                <div className="flex gap-4 items-center">
+                  <Image
+                    src={sdkPlaybackState.track_window.current_track.album.images[0]?.url || `https://picsum.photos/seed/${sdkPlaybackState.track_window.current_track.id}/64`}
+                    alt={sdkPlaybackState.track_window.current_track.name}
+                    width={64}
+                    height={64}
+                    className="rounded-md shadow-md"
+                  />
+                  <div className="flex-1 overflow-hidden">
+                    <p className="font-semibold truncate">{sdkPlaybackState.track_window.current_track.name}</p>
+                    <p className="text-sm text-muted-foreground truncate">{sdkPlaybackState.track_window.current_track.artists.map((a: any) => a.name).join(', ')}</p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
+              )}
+            </CardContent>
+          </Card>
 
-        {/* ── Lista de la Cola ── */}
-        <Card className="shadow-lg rounded-lg border border-border/70">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-              <ListMusic className="h-5 w-5" /> Cola de Reproducción ({queue.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-96">
-              {isLoadingQueue ? (
-                <div className="p-4 space-y-3">
-                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-md" />)}
-                </div>
-              ) : queue.length > 0 ? (
-                <div className="divide-y divide-border">
-                  {queue.map((song, idx) => (
-                    <div key={song.id} className="flex items-center gap-3 p-3 hover:bg-secondary/20 transition-colors">
-                      <span className="w-5 text-sm text-center text-muted-foreground font-medium">{idx + 1}</span>
-                      {song.albumArtUrl ? (
-                        <Image src={song.albumArtUrl} alt={song.title} width={40} height={40} className="h-10 w-10 rounded object-cover shadow-sm" data-ai-hint="song album" />
-                      ) : (
-                        <div className="h-10 w-10 bg-muted rounded flex items-center justify-center shadow-sm">
-                          <Music className="h-5 w-5 text-muted-foreground" />
+          {/* ── Lista de la Cola ── */}
+          <Card className="shadow-lg rounded-lg border border-border/70">
+            <CardHeader>
+              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+                <ListMusic className="h-5 w-5" /> Cola de Reproducción ({queue.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-96">
+                {isLoadingQueue ? (
+                  <div className="p-4 space-y-3">
+                    {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-md" />)}
+                  </div>
+                ) : queue.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {queue.map((song, idx) => (
+                      <div key={song.id} className="flex items-center gap-3 p-3 hover:bg-secondary/20 transition-colors">
+                        <span className="w-5 text-sm text-center text-muted-foreground font-medium">{idx + 1}</span>
+                        {song.albumArtUrl ? (
+                          <Image src={song.albumArtUrl} alt={song.title} width={40} height={40} className="h-10 w-10 rounded object-cover shadow-sm" data-ai-hint="song album" />
+                        ) : (
+                          <div className="h-10 w-10 bg-muted rounded flex items-center justify-center shadow-sm">
+                            <Music className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="flex-1 overflow-hidden">
+                          <p className="truncate font-medium text-sm">{song.title}</p>
+                          <p className="truncate text-xs text-muted-foreground">{song.artist}</p>
                         </div>
-                      )}
-                      <div className="flex-1 overflow-hidden">
-                        <p className="truncate font-medium text-sm">{song.title}</p>
-                        <p className="truncate text-xs text-muted-foreground">{song.artist}</p>
+                        <div className="flex gap-1.5">
+                          <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
+                              </TooltipTrigger>
+                              <TooltipContent><p>Mover Arriba</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}><ArrowDown /></Button>
+                              </TooltipTrigger>
+                              <TooltipContent><p>Mover Abajo</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => handleRemoveSong(song.id)}><Trash2 /></Button>
+                              </TooltipTrigger>
+                              <TooltipContent><p>Eliminar Canción</p></TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
                       </div>
-                      <div className="flex gap-1.5">
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4">
+                    <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
+                  </div>
+                )}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
+          {/* ── Buscador de canciones ── */}
+          <Card className="shadow-lg rounded-lg border border-border/70">
+            <CardHeader>
+              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+                <Search className="h-5 w-5" /> Añadir Canciones
+              </CardTitle>
+              {config.searchMode === 'playlist' && playlistDetails && (
+                <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
+                  <ListVideo className="h-4 w-4" />
+                  Playlist:
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <a
+                          href={playlistDetails.externalUrl || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium hover:underline truncate max-w-[200px]"
+                        >
+                          {playlistDetails.name}
+                        </a>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{playlistDetails.name}</p>
+                        {playlistDetails.description && <p className="text-xs text-muted-foreground">{playlistDetails.description}</p>}
+                        {playlistDetails.externalUrl && <p className="text-xs text-accent underline mt-1">Abrir en Spotify</p>}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-2 mb-4">
+                <Input
+                  placeholder="Nombre de canción o artista..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="flex-grow"
+                  disabled={isLoadingSearch || (config.searchMode === 'playlist' && !config.playlistId)}
+                />
+                {config.searchMode === 'playlist' && config.playlistId && (
+                  <Button onClick={handleLoadAllSongs} disabled={isLoadingSearch || !config.playlistId}>
+                    {isLoadingSearch && searchTerm === '' ? <RefreshCw className="animate-spin h-4 w-4" /> : <ListMusic className="h-4 w-4" />}
+                    <span className="ml-2 hidden sm:inline">Ver Todas</span>
+                  </Button>
+                )}
+              </div>
+              <ScrollArea className="h-72 border rounded-md">
+                <div className="p-2 space-y-1">
+                  {isLoadingSearch ? (
+                    [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)
+                  ) : searchResults.length > 0 ? (
+                    searchResults.map((song) => (
+                      <div
+                        key={song.spotifyTrackId}
+                        className="flex items-center justify-between p-2 rounded-md hover:bg-secondary/20 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 overflow-hidden flex-1">
+                          {song.albumArtUrl ? (
+                            <Image src={song.albumArtUrl} width={32} height={32} className="w-8 h-8 rounded object-cover" alt={song.title} data-ai-hint="song album" />
+                          ) : (
+                            <div className="w-8 h-8 bg-muted flex items-center justify-center rounded">
+                              <Music className="text-muted-foreground h-4 w-4" />
+                            </div>
+                          )}
+                          <div className="truncate">
+                            <p className="font-medium text-sm truncate">{song.title}</p>
+                            <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
+                          </div>
+                        </div>
                         <TooltipProvider delayDuration={100}>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAddSong(song)} disabled={queue.some(s => s.spotifyTrackId === song.spotifyTrackId)}>
+                                <PlusCircle />
+                              </Button>
                             </TooltipTrigger>
-                            <TooltipContent><p>Mover Arriba</p></TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}><ArrowDown /></Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Mover Abajo</p></TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => handleRemoveSong(song.id)}><Trash2 /></Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Eliminar Canción</p></TooltipContent>
+                            <TooltipContent><p>{queue.some(s => s.spotifyTrackId === song.spotifyTrackId) ? 'Ya en cola' : 'Añadir a la cola'}</p></TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : searchTerm ? (
+                    <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
+                  ) : (
+                    <p className="text-center text-sm text-muted-foreground py-4 italic">
+                      {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <div className="p-4">
-                  <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
-                </div>
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* ── Buscador de canciones ── */}
-        <Card className="shadow-lg rounded-lg border border-border/70">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-              <Search className="h-5 w-5" /> Añadir Canciones
-            </CardTitle>
-            {config.searchMode === 'playlist' && playlistDetails && (
-              <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-                <ListVideo className="h-4 w-4" />
-                Playlist:
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <a
-                        href={playlistDetails.externalUrl || '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium hover:underline truncate max-w-[200px]"
-                      >
-                        {playlistDetails.name}
-                      </a>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{playlistDetails.name}</p>
-                      {playlistDetails.description && <p className="text-xs text-muted-foreground">{playlistDetails.description}</p>}
-                      {playlistDetails.externalUrl && <p className="text-xs text-accent underline mt-1">Abrir en Spotify</p>}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+        {/* Columna lateral */}
+        <div className="w-full md:w-96 space-y-6">
+          <Card className="shadow-lg rounded-lg border border-border/70">
+            <CardHeader>
+              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
+                <Settings className="h-5 w-5" /> Configuración
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <Label htmlFor="search-mode-toggle" className="text-base font-medium mb-2 block">Modo de Búsqueda</Label>
+                <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
+                  <Switch
+                    id="search-mode-toggle"
+                    checked={config.searchMode === 'playlist'}
+                    onCheckedChange={(checked) => {
+                      setConfig(prev => ({ ...prev, searchMode: checked ? 'playlist' : 'all' }));
+                    }}
+                    aria-label="Cambiar modo de búsqueda"
+                  />
+                  <Label htmlFor="search-mode-toggle" className="cursor-pointer flex-1">
+                    {config.searchMode === 'playlist' ? 'Solo en Playlist Especificada' : 'En todo Spotify'}
+                  </Label>
+                </div>
               </div>
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-2 mb-4">
-              <Input
-                placeholder="Nombre de canción o artista..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="flex-grow"
-                disabled={isLoadingSearch || (config.searchMode === 'playlist' && !config.playlistId)}
-              />
-              {config.searchMode === 'playlist' && config.playlistId && (
-                <Button onClick={handleLoadAllSongs} disabled={isLoadingSearch || !config.playlistId}>
-                  {isLoadingSearch && searchTerm === '' ? <RefreshCw className="animate-spin h-4 w-4" /> : <ListMusic className="h-4 w-4" />}
-                  <span className="ml-2 hidden sm:inline">Ver Todas</span>
-                </Button>
+
+              {config.searchMode === 'playlist' && (
+                <div>
+                  <Label htmlFor="playlist-id-input" className="text-base font-medium mb-2 block">ID de la Playlist de Spotify</Label>
+                  <Input
+                    id="playlist-id-input"
+                    placeholder="Ej: 37i9dQZF1DXcBWIGoYBM5M"
+                    value={playlistIdInput}
+                    onChange={(e) => setPlaylistIdInput(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Pega el ID de la playlist de Spotify aquí.</p>
+                </div>
               )}
-            </div>
-            <ScrollArea className="h-72 border rounded-md">
-              <div className="p-2 space-y-1">
-                {isLoadingSearch ? (
-                  [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)
-                ) : searchResults.length > 0 ? (
-                  searchResults.map((song) => (
-                    <div
-                      key={song.spotifyTrackId}
-                      className="flex items-center justify-between p-2 rounded-md hover:bg-secondary/20 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 overflow-hidden flex-1">
-                        {song.albumArtUrl ? (
-                          <Image src={song.albumArtUrl} width={32} height={32} className="w-8 h-8 rounded object-cover" alt={song.title} data-ai-hint="song album" />
-                        ) : (
-                          <div className="w-8 h-8 bg-muted flex items-center justify-center rounded">
-                            <Music className="text-muted-foreground h-4 w-4" />
-                          </div>
-                        )}
-                        <div className="truncate">
-                          <p className="font-medium text-sm truncate">{song.title}</p>
-                          <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
-                        </div>
-                      </div>
-                      <TooltipProvider delayDuration={100}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAddSong(song)} disabled={queue.some(s => s.spotifyTrackId === song.spotifyTrackId)}>
-                              <PlusCircle />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent><p>{queue.some(s => s.spotifyTrackId === song.spotifyTrackId) ? 'Ya en cola' : 'Añadir a la cola'}</p></TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                  ))
-                ) : searchTerm ? (
-                  <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
-                ) : (
-                  <p className="text-center text-sm text-muted-foreground py-4 italic">
-                    {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
-                  </p>
+              <Button onClick={handleConfigSave} className="w-full mt-2">
+                Guardar Configuración
+              </Button>
+
+              <hr className="my-4 border-border" />
+
+              <div>
+                <Label className="text-base font-medium mb-2 block">Conexión con Spotify</Label>
+                <Button
+                  onClick={handleSpotifyAction}
+                  variant={
+                    spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
+                      ? 'default'
+                      : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
+                      ? 'secondary'
+                      : 'destructive'
+                  }
+                  className="w-full"
+                >
+                  {spotifyStatus?.spotifyConnected ? <><LogOut className="mr-2 h-4 w-4" /> Desconectar Spotify</> : <><ExternalLink className="mr-2 h-4 w-4" /> Conectar Spotify</>}
+                </Button>
+                {spotifyStatus && (
+                  <div className="mt-2 text-xs space-y-0.5 p-2 border rounded-md bg-muted/30">
+                    <p>Conectado: {spotifyStatus.spotifyConnected ? 'Sí ✅' : 'No ❌'}</p>
+                    <p>Tokens válidos: {spotifyStatus.tokensOk ? 'Sí ✅' : 'No ❌'}</p>
+                    <p>Reproducción activa: {spotifyStatus.playbackAvailable ? `Sí en "${spotifyStatus.activeDevice?.name || 'dispositivo desconocido'}" ✅` : 'No ⚠️'}</p>
+                    {spotifyStatus.message && <p className="italic text-destructive/80">{spotifyStatus.message}</p>}
+                  </div>
                 )}
               </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Columna lateral */}
-      <div className="w-full md:w-96 space-y-6">
-        <Card className="shadow-lg rounded-lg border border-border/70">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-              <Settings className="h-5 w-5" /> Configuración
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div>
-              <Label htmlFor="search-mode-toggle" className="text-base font-medium mb-2 block">Modo de Búsqueda</Label>
-              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
-                <Switch
-                  id="search-mode-toggle"
-                  checked={config.searchMode === 'playlist'}
-                  onCheckedChange={(checked) => {
-                    setConfig(prev => ({ ...prev, searchMode: checked ? 'playlist' : 'all' }));
-                  }}
-                  aria-label="Cambiar modo de búsqueda"
-                />
-                <Label htmlFor="search-mode-toggle" className="cursor-pointer flex-1">
-                  {config.searchMode === 'playlist' ? 'Solo en Playlist Especificada' : 'En todo Spotify'}
-                </Label>
-              </div>
-            </div>
-
-            {config.searchMode === 'playlist' && (
-              <div>
-                <Label htmlFor="playlist-id-input" className="text-base font-medium mb-2 block">ID de la Playlist de Spotify</Label>
-                <Input
-                  id="playlist-id-input"
-                  placeholder="Ej: 37i9dQZF1DXcBWIGoYBM5M"
-                  value={playlistIdInput}
-                  onChange={(e) => setPlaylistIdInput(e.target.value)}
-                  className="text-sm"
-                />
-                <p className="text-xs text-muted-foreground mt-1">Pega el ID de la playlist de Spotify aquí.</p>
-              </div>
-            )}
-            <Button onClick={handleConfigSave} className="w-full mt-2">
-              Guardar Configuración
-            </Button>
-
-            <hr className="my-4 border-border" />
-
-            <div>
-              <Label className="text-base font-medium mb-2 block">Conexión con Spotify</Label>
-              <Button
-                onClick={handleSpotifyAction}
-                variant={
-                  spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
-                    ? 'default'
-                    : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
-                    ? 'secondary'
-                    : 'destructive'
-                }
-                className="w-full"
-              >
-                {spotifyStatus?.spotifyConnected ? <><LogOut className="mr-2 h-4 w-4" /> Desconectar Spotify</> : <><ExternalLink className="mr-2 h-4 w-4" /> Conectar Spotify</>}
+            </CardContent>
+            <CardFooter className="flex flex-col gap-2 pt-4 border-t">
+              <Button variant="outline" onClick={() => router.push('/')} className="w-full">
+                <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
               </Button>
-              {spotifyStatus && (
-                <div className="mt-2 text-xs space-y-0.5 p-2 border rounded-md bg-muted/30">
-                  <p>Conectado: {spotifyStatus.spotifyConnected ? 'Sí ✅' : 'No ❌'}</p>
-                  <p>Tokens válidos: {spotifyStatus.tokensOk ? 'Sí ✅' : 'No ❌'}</p>
-                  <p>Reproducción activa: {spotifyStatus.playbackAvailable ? `Sí en "${spotifyStatus.activeDevice?.name || 'dispositivo desconocido'}" ✅` : 'No ⚠️'}</p>
-                  {spotifyStatus.message && <p className="italic text-destructive/80">{spotifyStatus.message}</p>}
-                </div>
-              )}
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => router.push('/')} className="w-full">
-              <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
-            </Button>
-            <Button variant="outline" onClick={() => auth && signOut(auth)} className="w-full">
-              <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={async () => {
-                if (!db) return;
-                const isConfirmed = window.confirm("¿Estás seguro de que quieres forzar la sincronización? Esto intentará reproducir la siguiente canción de la cola.");
-                if (!isConfirmed) return;
+              <Button variant="outline" onClick={() => auth && signOut(auth)} className="w-full">
+                <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={async () => {
+                  if (!db) return;
+                  const isConfirmed = window.confirm("¿Estás seguro de que quieres forzar la sincronización? Esto intentará reproducir la siguiente canción de la cola.");
+                  if (!isConfirmed) return;
 
-                toast({ title: "⏳ Forzando sincronización...", description: "Intentando reproducir la siguiente canción." });
-                await handleTrackEndNotification(null);
-                toast({
-                  title: '🎵 Reproducción Forzada',
-                  description: 'Se intentó reproducir la siguiente canción.',
-                });
-                mutateCurrentPlaying();
-              }}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" /> Forzar Sincronización
-            </Button>
-            <Button
-              variant="destructive"
-              className="w-full"
-              onClick={handleClearQueue}
-              disabled={queue.length === 0 || isLoadingQueue}
-            >
-              {isLoadingQueue ? <RefreshCw className="animate-spin mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
-              Vaciar Cola ({queue.length})
-            </Button>
-          </CardFooter>
-        </Card>
+                  toast({ title: "⏳ Forzando sincronización...", description: "Intentando reproducir la siguiente canción." });
+                  await handleTrackEndNotification(null); // Simulate track end to trigger next song
+                  toast({
+                    title: '🎵 Reproducción Forzada',
+                    description: 'Se intentó reproducir la siguiente canción.',
+                  });
+                  mutateCurrentPlaying(); // Refresh current playing info
+                }}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" /> Forzar Sincronización
+              </Button>
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={handleClearQueue}
+                disabled={queue.length === 0 || isLoadingQueue}
+              >
+                {isLoadingQueue ? <RefreshCw className="animate-spin mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Vaciar Cola ({queue.length})
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
       </div>
-
-      <footer className="w-full text-center text-gray-500 text-sm p-4">
+      <footer className="w-full text-center text-gray-500 text-sm p-4 mt-auto">
         Version: {process.env.NEXT_PUBLIC_APP_VERSION}
       </footer>
     </div>
