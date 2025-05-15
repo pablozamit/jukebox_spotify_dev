@@ -564,8 +564,29 @@ useEffect(() => {
   if (lastTrackId !== currentTrackId) {
     console.log('[Jukebox] Track ha cambiado:', lastTrackId, '->', currentTrackId);
     setLastTrackId(currentTrackId);
+  
+    // 🔥 Eliminar de la cola la canción que acaba de empezar a sonar
+    if (db) {
+      const queueRef = ref(db, '/queue');
+      try {
+        const snapshot = await get(queueRef);
+        const data = snapshot.val() || {};
+        for (const key in data) {
+          if (data[key].spotifyTrackId === currentTrackId) {
+            console.log(`🔁 Eliminando ${currentTrackId} de la cola (id interno: ${key})`);
+            await remove(ref(db, `/queue/${key}`));
+            break;
+          }
+        }
+      } catch (e) {
+        console.error('Error eliminando canción de la cola al empezar a sonar:', e);
+      }
+    }
+  
+    // ⏭️ Lanzar siguiente canción si existe
     handleTrackEndNotification(currentTrackId);
   }
+  
 }, [sdkPlaybackState?.track_window?.current_track?.id]);
 
   return (
