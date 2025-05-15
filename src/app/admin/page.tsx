@@ -87,7 +87,54 @@ export default function AdminPage() {
   const [searchResults, setSearchResults] = useState<Song[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
 
-  const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 3000 });
+  const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 5000 });
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const progressMs = currentPlaying?.progress_ms;
+      const durationMs = currentPlaying?.item?.duration_ms;
+      const currentTrackId = currentPlaying?.item?.id;
+  
+      if (!progressMs || !durationMs || !currentTrackId || queue.length === 0) return;
+  
+      const remaining = durationMs - progressMs;
+      if (remaining <= 8000) {
+        console.log(`[Jukebox] Quedan ${remaining}ms para que termine ${currentTrackId}`);
+  
+        const firstInQueue = queue[0];
+        if (!firstInQueue) return;
+  
+        try {
+          const res = await fetch('/api/spotify/add-to-queue', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trackUri: `spotify:track:${firstInQueue.spotifyTrackId}` }),
+          });
+  
+          if (!res.ok) throw new Error('No se pudo añadir la canción a la cola de Spotify');
+  
+          console.log(`[Jukebox] Añadida a Spotify Queue: ${firstInQueue.title}`);
+  
+          // ELIMINAR la canción que acaba de empezar a sonar de la cola Firebase
+          if (!db) {
+            console.error('Firebase database no está inicializado');
+            return;
+          }
+          const songRef = ref(db, `/queue/${firstInQueue.id}`);
+          await remove(songRef);
+          
+          console.log(`[Jukebox] Eliminada de Firebase Queue: ${firstInQueue.title}`);
+  
+        } catch (err) {
+          console.error('Error añadiendo canción a la cola de Spotify o eliminándola de Firebase:', err);
+        }
+      }
+    }, 5000);
+  
+    return () => clearInterval(interval);
+  }, [currentPlaying, queue]);
+  
+
 
   // Authentication Check
   useEffect(() => {
