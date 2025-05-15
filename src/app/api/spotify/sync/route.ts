@@ -159,11 +159,14 @@ if (alreadyEnqueuedSnap.exists()) {
 
 try {
   await enqueueTrack(accessToken, trackUri, deviceId);
-  await db.ref(`/queue/${nextQueueSong.id}`).remove();
-  await db.ref(enqueuedKey).set({ timestamp: Date.now() });
-
-  console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
+  await db.ref(enqueuedKey).set({
+    timestamp: Date.now(),
+    trackId: nextQueueSong.id,
+  });
+  
+  console.log(`DEBUG: Canción añadida a cola Spotify (NO eliminada aún): ${nextQueueSong.spotifyTrackId}`);
   return NextResponse.json({ success: true, enqueued: nextQueueSong });
+  
 } catch (err: any) {
   await logError(err.response?.data || err.message || 'Error encolando canción en Spotify');
   console.error("DEBUG: Error encolando canción:", err);
