@@ -79,7 +79,6 @@ export default function AdminPage() {
   const [config, setConfig] = useState<SpotifyConfig>({ searchMode: 'all' });
   const [playlistIdInput, setPlaylistIdInput] = useState('');
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
-  const [sdkPlaybackState, setSdkPlaybackState] = useState<any>(null);
   const [spotifyStatus, setSpotifyStatus] = useState<SpotifyStatus | null>(null);
   const [spotifyAccessToken, setSpotifyAccessToken] = useState<string | null>(null);
   const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
@@ -553,42 +552,7 @@ export default function AdminPage() {
     return null;
   }
 
-  // Detectar nueva canción y notificar automáticamente
-const [lastTrackId, setLastTrackId] = useState<string | null>(null);
 
-useEffect(() => {
-  const currentTrackId = sdkPlaybackState?.track_window?.current_track?.id;
-
-  if (!currentTrackId || typeof currentTrackId !== 'string') return;
-  if (lastTrackId === currentTrackId) return;
-
-  console.log('[Jukebox] Track ha cambiado:', lastTrackId, '->', currentTrackId);
-  setLastTrackId(currentTrackId);
-
-  const eliminarYNotificar = async () => {
-    if (!db) return;
-
-    const queueRef = ref(db, '/queue');
-    try {
-      const snapshot = await get(queueRef);
-      const data = snapshot.val() || {};
-
-      for (const key in data) {
-        if (data[key].spotifyTrackId === currentTrackId) {
-          console.log(`🧹 Eliminando ${currentTrackId} de la cola (id interno: ${key})`);
-          await remove(ref(db, `/queue/${key}`));
-          break;
-        }
-      }
-    } catch (e) {
-      console.error('Error eliminando canción de la cola al empezar a sonar:', e);
-    }
-
-    handleTrackEndNotification(currentTrackId);
-  };
-
-  eliminarYNotificar();
-}, [sdkPlaybackState?.track_window?.current_track?.id]);
 
 
   return (
@@ -606,24 +570,24 @@ useEffect(() => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {sdkPlaybackState && sdkPlaybackState.track_window && sdkPlaybackState.track_window.current_track ? (
-                <div className="flex gap-4 items-center">
-                  <Image
-                    src={sdkPlaybackState.track_window.current_track.album.images[0]?.url || `https://picsum.photos/seed/${sdkPlaybackState.track_window.current_track.id}/64`}
-                    alt={sdkPlaybackState.track_window.current_track.name}
-                    width={64}
-                    height={64}
-                    className="rounded-md shadow-md"
-                    data-ai-hint="song album"
-                  />
-                  <div className="flex-1 overflow-hidden">
-                    <p className="font-semibold truncate">{sdkPlaybackState.track_window.current_track.name}</p>
-                    <p className="text-sm text-muted-foreground truncate">{sdkPlaybackState.track_window.current_track.artists.map((a: any) => a.name).join(', ')}</p>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
-              )}
+            {currentPlaying && currentPlaying.title ? (
+  <div className="flex gap-4 items-center">
+    <Image
+      src={currentPlaying.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.spotifyTrackId}/64`}
+      alt={currentPlaying.title}
+      width={64}
+      height={64}
+      className="rounded-md shadow-md"
+    />
+    <div className="flex-1 overflow-hidden">
+      <p className="font-semibold truncate">{currentPlaying.title}</p>
+      <p className="text-sm text-muted-foreground truncate">{currentPlaying.artist}</p>
+    </div>
+  </div>
+) : (
+  <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
+)}
+
             </CardContent>
           </Card>
 
