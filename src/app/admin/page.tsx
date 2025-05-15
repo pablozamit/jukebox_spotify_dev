@@ -553,6 +553,21 @@ export default function AdminPage() {
     return null;
   }
 
+  // Detectar nueva canción y notificar automáticamente
+const [lastTrackId, setLastTrackId] = useState<string | null>(null);
+
+useEffect(() => {
+  const currentTrackId = sdkPlaybackState?.track_window?.current_track?.id;
+
+  if (!currentTrackId || typeof currentTrackId !== 'string') return;
+
+  if (lastTrackId !== currentTrackId) {
+    console.log('[Jukebox] Track ha cambiado:', lastTrackId, '->', currentTrackId);
+    setLastTrackId(currentTrackId);
+    handleTrackEndNotification(currentTrackId);
+  }
+}, [sdkPlaybackState?.track_window?.current_track?.id]);
+
   return (
     <div className="container mx-auto p-4 flex flex-col min-h-screen">
       {/* Spotify Playback SDK Integration */}
