@@ -76,7 +76,10 @@ export async function searchSpotify(
     }));
 }
 
-// ▶️ Reproducir canción directamente por ID
+/**
+ * @deprecated La reproducción directa ya no se utiliza.
+ * Ahora se usa el método de encolado en Spotify mediante la API `/me/player/queue`.
+ */
 export async function playTrack(accessToken: string, deviceId: string, trackId: string): Promise<void> {
   const retries = 3;
   const delay = 1000;
@@ -131,7 +134,7 @@ export async function getSpotifyAccessToken(): Promise<string> {
     throw new Error('Firebase DB no está inicializada');
   }
   const tokensRef = dbRef(db, '/admin/spotify/tokens');
-  
+
   const snapshot = await dbGet(tokensRef);
   const tokens = snapshot.val();
 

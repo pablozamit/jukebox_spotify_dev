@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
 import { auth, db, isDbValid } from '@/lib/firebase';
-import { SpotifyPlaybackSDK } from '@/components/SpotifyPlaybackSDK';
 import { useToast } from '@/hooks/use-toast';
 import useSWR from 'swr';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -62,11 +61,6 @@ interface SpotifyStatus {
   message?: string;
 }
 
-interface SpotifyPlaybackSDKRef {
-  playUri: (uri: string) => Promise<void>;
-  pause: () => Promise<void>;
-}
-
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error('Error al cargar datos.');
@@ -85,9 +79,6 @@ export default function AdminPage() {
   const [playlistIdInput, setPlaylistIdInput] = useState('');
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
   const [sdkPlaybackState, setSdkPlaybackState] = useState<any>(null);
-  const [sdkReady, setSdkReady] = useState(false);
-  const [sdkDeviceId, setSdkDeviceId] = useState<string | null>(null);
-  const sdkPlayerRef = useRef<SpotifyPlaybackSDKRef>(null);
   const [spotifyStatus, setSpotifyStatus] = useState<SpotifyStatus | null>(null);
   const [spotifyAccessToken, setSpotifyAccessToken] = useState<string | null>(null);
   const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
@@ -262,7 +253,6 @@ export default function AdminPage() {
 
     if (!endedTrackId) {
       console.warn('handleTrackEndNotification called without endedTrackId');
-      // Aunque no tengamos endedTrackId, intentaremos reproducir la siguiente si hay
     }
 
     // 1. Notificar al backend para eliminar la canción anterior
@@ -292,7 +282,7 @@ export default function AdminPage() {
       console.warn('Skipping backend notification: No endedTrackId provided.');
     }
 
-    // 2. Reproducir la siguiente canción de la cola (si existe)
+    // 2. Gestionar la siguiente canción de la cola (si existe)
     const nextSong = queue[0]; // El primer elemento de la cola es el siguiente a sonar
 
     if (nextSong) {
@@ -305,55 +295,25 @@ export default function AdminPage() {
         });
         return;
       }
-      let retries = 0;
-const maxRetries = 15; // Aumentamos el tiempo de espera total a 15s
-while (
-  (!sdkReady || !sdkDeviceId || !spotifyAccessToken || !sdkPlayerRef.current) &&
-  retries < maxRetries
-) {
-  console.warn(`[Sync Retry] Esperando SDK: intento ${retries + 1}/${maxRetries}`);
-  await new Promise((res) => setTimeout(res, 1000));
-  retries++;
-}
-
-
-      if (!sdkPlayerRef.current || !sdkReady) {
-        console.error("El SDK no estuvo listo a tiempo. Cancelando reproducción.");
-        toast({
-          title: 'Error de Reproducción',
-          description: 'No se pudo reproducir la siguiente canción. El reproductor no está listo.',
-          variant: 'destructive',
-        });
-        return;
-      }
 
       try {
-        await sdkPlayerRef.current.playUri(trackUri);
-        // Forzar que el control del playback pase al dispositivo del SDK
-await fetch('/api/spotify/transfer-playback', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ device_id: sdkDeviceId }),
-});
+        // Notificar al backend para transferir la reproducción (sin depender del SDK directamente aquí)
+        await fetch('/api/spotify/transfer-playback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trackUri }),
+        });
 
         toast({
           title: '🎵 Reproduciendo siguiente canción',
           description: `Ahora suena: ${nextSong.title}`,
         });
       } catch (error: any) {
-        console.error('Error al reproducir la siguiente canción con el SDK:', error);
+        console.error('Error al gestionar la siguiente canción:', error);
         toast({ title: 'Error de Reproducción', description: `No se pudo reproducir ${nextSong.title}.`, variant: 'destructive' });
       }
     } else {
-      console.log('La cola está vacía o el reproductor no está listo. No hay siguiente canción para reproducir.');
-      if (sdkPlayerRef.current) {
-        try {
-          await sdkPlayerRef.current.pause();
-          console.log("Player paused as queue is empty.");
-        } catch (pauseError) {
-          console.error("Error pausing player:", pauseError);
-        }
-      }
+      console.log('La cola está vacía. No hay siguiente canción para reproducir.');
       toast({ title: 'Cola vacía', description: 'La cola de reproducción ha terminado.' });
     }
 
@@ -595,18 +555,6 @@ await fetch('/api/spotify/transfer-playback', {
   return (
     <div className="container mx-auto p-4 flex flex-col md:flex-row gap-6 min-h-screen">
       {/* Spotify Playback SDK Integration */}
-      {spotifyStatus?.spotifyConnected && spotifyAccessToken && (
-        <SpotifyPlaybackSDK
-          ref={sdkPlayerRef}
-          accessToken={spotifyAccessToken}
-          onStateChange={setSdkPlaybackState}
-          onTrackEnd={handleTrackEndNotification}
-          onReady={(deviceId: React.SetStateAction<string | null>) => {
-            setSdkReady(true);
-            setSdkDeviceId(deviceId);
-          }}
-        />
-      )}
 
       {/* Columna principal */}
       <div className="flex-1 space-y-6">
@@ -886,7 +834,7 @@ await fetch('/api/spotify/transfer-playback', {
                 await handleTrackEndNotification(null);
                 toast({
                   title: '🎵 Reproducción Forzada',
-                  description: 'Se intentó reproducir la siguiente canción desde el SDK del navegador.',
+                  description: 'Se intentó reproducir la siguiente canción.',
                 });
                 mutateCurrentPlaying();
               }}

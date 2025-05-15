@@ -5,7 +5,6 @@ import axios from 'axios';
 import * as admin from 'firebase-admin';
 
 const SPOTIFY_BASE_URL = 'https://api.spotify.com/v1';
-const SAFETY_BUFFER_MS = 1000; // 1 second
 const SPOTIFY_API_TIMEOUT = 5000;
 
 const httpClient = axios.create({ timeout: SPOTIFY_API_TIMEOUT });
@@ -17,8 +16,6 @@ const getFirebaseApp = () => {
       credential: admin.credential.cert(raw),
       databaseURL: process.env.FIREBASE_DATABASE_URL,
     });
-  }
-  if (!admin.apps.length) {
   }
   return admin.app();
 };
@@ -67,64 +64,27 @@ async function getPlaybackState(accessToken: string): Promise<any | null> {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  if (res.status === 204) { // No content, indicating no active playback
+  if (res.status === 204) {
     return null;
   } else if (res.status !== 200) {
-    // Handle other non-200 status codes
     throw new Error(`Spotify API returned status ${res.status} for playback state`);
   }
 
   return res.data;
 }
 
-async function getRandomTrackFromPlaylist(accessToken: string, deviceId: string, playlistId: string): Promise<any | null> {
-  try {
-    const allTracks: any[] = [];
-    let url: string | null = `${SPOTIFY_BASE_URL}/playlists/${playlistId}/tracks?limit=50`;
+async function enqueueTrack(accessToken: string, trackUri: string, deviceId?: string) {
+  const url = `${SPOTIFY_BASE_URL}/me/player/queue`;
+  const params = new URLSearchParams({ uri: trackUri });
+  if (deviceId) params.append('device_id', deviceId);
 
-    while (url) {
-      try {
-        const response: any = await httpClient.get(url, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-
-
-        if (response.status === 200) {
-          allTracks.push(...response.data.items.map((item: any) => item.track).filter(Boolean)); // Add track objects, filter out nulls
-          url = response.data.next;
-        } else {
-          console.error(`Error fetching playlist tracks: Status ${response.status}`);
-          url = null; // Stop the loop on error
-        }
-      } catch (error) {
-        console.error("Error during fetching playlist tracks:", error);
-        url = null; // Stop the loop on error
-      }
-    }
-
-    if (allTracks.length === 0) {
-      return null; // Playlist is empty or could not be loaded
-    }
-
-    const randomIndex = Math.floor(Math.random() * allTracks.length);
-    return allTracks[randomIndex];
-  } catch (error: any) {
-    console.error("Error in getRandomTrackFromPlaylist:", error);
-    return null; // Return null on error
-  }
-}
-
-async function playTrack(accessToken: string, deviceId: string, trackId: string) {
-  const url = `${SPOTIFY_BASE_URL}/me/player/play?device_id=${deviceId}`;
   const headers = { Authorization: `Bearer ${accessToken}` };
-  const body = { uris: [`spotify:track:${trackId}`] };
 
-  await httpClient.put(url, body, { headers });
+  await httpClient.post(`${url}?${params}`, {}, { headers });
 }
 
 async function getNextTrack(db: admin.database.Database): Promise<any | null> {
-  console.error("DEBUG: Intentando obtener siguiente cancion de la cola");
+  console.log("DEBUG: Intentando obtener siguiente canción de la cola");
   const snap = await db.ref('/queue').once('value');
   const queue = snap.val() || {};
 
@@ -151,7 +111,7 @@ export async function POST() {
   const db = getFirebaseApp().database();
 
   try {
-    console.error("DEBUG: Iniciando sincronizacion");
+    console.log("DEBUG: Iniciando sincronización");
     const tokensSnap = await db.ref('/admin/spotify/tokens').once('value');
     const tokens = tokensSnap.val();
 
@@ -162,85 +122,41 @@ export async function POST() {
 
     const accessToken = await refreshTokenIfNeeded(tokens);
     const deviceId = await getActiveDeviceId(accessToken);
-    console.error("DEBUG: Device ID:", deviceId);
+    console.log("DEBUG: Device ID:", deviceId);
 
     const playbackState = await getPlaybackState(accessToken);
-    console.error("DEBUG: Playback State:", JSON.stringify(playbackState, null, 2));
-
-    const isSongFinished =
-  playbackState &&
-  !playbackState.is_playing &&
-  playbackState.item &&
-  playbackState.progress_ms >= playbackState.item.duration_ms;
-
-if (!isSongFinished) {
-  console.error("DEBUG: Canción no ha terminado. Se respeta el estado actual (reproduciendo o pausado).");
-  return NextResponse.json({ message: 'Playback active or paused. No sync needed.' });
-}
-
-
-    // Get the next track from the queue
     const nextQueueSong = await getNextTrack(db);
-    console.error("DEBUG: Primera cancion de la cola:", nextQueueSong?.spotifyTrackId);
 
-    if (!nextQueueSong) { // If the queue is empty
-      console.error("DEBUG: Cola vacia. Verificando configuracion de playlist.");
-      const configSnap = await db.ref('/config').once('value'); // Fetch config here
-      const config = configSnap.val() || {};
+    if (!nextQueueSong) {
+      console.log("DEBUG: No hay canciones en la cola Firebase.");
+      return NextResponse.json({ message: 'No tracks in queue' });
+    }
 
-      if (config.searchMode === 'playlist' && config.playlistId) { // If in playlist mode and playlistId is set
-        console.error(`DEBUG: Modo playlist. Intentando reproducir aleatoria de playlist: ${config.playlistId}`);
-        const randomSong = await getRandomTrackFromPlaylist(accessToken, deviceId, config.playlistId);
+    // Nueva condición crítica
+    if (playbackState && playbackState.item) {
+      const remainingTime = playbackState.item.duration_ms - playbackState.progress_ms;
 
-        if (randomSong) {
-          console.error("DEBUG: Cancion aleatoria obtenida. Intentando reproducir:", randomSong.id);
-          await playTrack(accessToken, deviceId, randomSong.id);
-          console.error("DEBUG: Llamada a playTrack con cancion aleatoria completada.");
-          return NextResponse.json({ success: true, playedRandom: randomSong });
-        } else {
-          console.error("DEBUG: No se pudo obtener cancion aleatoria de la playlist.");
-          return NextResponse.json({ message: 'Queue empty, playlist mode, but could not get random track from playlist.' });
-        }
-      } else { // If queue is empty but NOT in playlist mode
-        console.error("DEBUG: Cola vacia. Modo no es playlist o no hay playlistId. No se reproduce nada.");
-        return NextResponse.json({ message: 'Queue is empty' });
+      if (remainingTime > 10_000) { // más de 10 segundos restantes
+        console.log("DEBUG: Más de 10 segundos restantes en la canción actual. Aún no añadimos la siguiente.");
+        return NextResponse.json({ message: 'Song still playing, no enqueue yet.' });
       }
-    } else { // If there are songs in the queue
-      const isPlaying = playbackState?.is_playing;
-      const currentTrackId = playbackState?.item?.id;
+    }
 
-      // Calculate time remaining of the current track in milliseconds
-      const progressMs = playbackState?.progress_ms || 0;
-      const durationMs = playbackState?.item?.duration_ms || 0;
-      const timeRemainingMs = durationMs - progressMs;
-
-      console.error(`DEBUG: isPlaying: ${isPlaying}, currentTrackId: ${currentTrackId}, timeRemainingMs: ${timeRemainingMs}`);
-      console.error(`DEBUG: Siguiente cancion ID en cola: ${nextQueueSong.spotifyTrackId}`);
-
-      if (
-        playbackState?.item == null ||
-        currentTrackId !== nextQueueSong?.spotifyTrackId ||
-        (!playbackState.is_playing && progressMs >= durationMs)
-      ) {
-        console.error("DEBUG: Condicion de reproduccion cumplida para la cola. Intentando reproducir la siguiente:", nextQueueSong.spotifyTrackId);
-        await playTrack(accessToken, deviceId, nextQueueSong.spotifyTrackId);
-        console.error("DEBUG: Llamada a playTrack completada. Eliminando cancion de la cola:", nextQueueSong.id);
-        await db.ref(`/queue/${nextQueueSong.id}`).remove();
-        console.error("DEBUG: Cancion eliminada de la cola.");
-
-        return NextResponse.json({ success: true, played: nextQueueSong });
-      } else {
-        // If we reach here, Spotify is playing the correct song and it's not near the end, and it's not paused intentionally.
-        console.error("DEBUG: Spotify esta reproduciendo la cancion correcta de la cola y no necesita avance.");
-        return NextResponse.json({ message: 'Spotify is playing the correct track from queue and does not need to advance.' });
-      }
+    // Procedemos a añadir la canción a la cola si queda poco tiempo
+    const trackUri = `spotify:track:${nextQueueSong.spotifyTrackId}`;
+    try {
+      await enqueueTrack(accessToken, trackUri, deviceId);
+      await db.ref(`/queue/${nextQueueSong.id}`).remove();
+      console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
+      return NextResponse.json({ success: true, enqueued: nextQueueSong });
+    } catch (err: any) {
+      await logError(err.response?.data || err.message || 'Error encolando canción en Spotify');
+      console.error("DEBUG: Error encolando canción:", err);
+      return NextResponse.json({ error: 'Error encolando canción: ' + err.message }, { status: 500 });
     }
   } catch (err: any) {
     await logError(err.response?.data || err.message || 'Unknown error in sync');
-    console.error("DEBUG: Error en sincronizacion:", err);
-    if (err.response?.data) {
-      console.error("DEBUG: Detalles del error de Spotify:", err.response.data);
-    }
+    console.error("DEBUG: Error en sincronización:", err);
     return NextResponse.json({ error: 'Error: ' + (err?.message || 'desconocido') }, { status: 500 });
   }
 }

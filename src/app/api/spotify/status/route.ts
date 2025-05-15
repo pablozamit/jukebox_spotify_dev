@@ -72,9 +72,7 @@ export async function GET() {
     });
 
     const data = test.data || {};
-    const activeDevice = Array.isArray(data.devices)
-      ? data.devices.find((d: any) => d.is_active)
-      : data.device;
+    const activeDevice = data.device || null;
 
     return NextResponse.json({
       spotifyConnected: true,
