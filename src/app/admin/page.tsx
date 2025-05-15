@@ -258,7 +258,14 @@ export default function AdminPage() {
 
   // Handle Track End Notification
   const handleTrackEndNotification = async (endedTrackId: string | null) => {
-    console.log('Canción terminada, gestionando siguiente y notificando backend...');
+    console.log('%c🛠️ [Jukebox] handleTrackEndNotification llamado', 'color: teal; font-weight: bold;');
+console.log('🎯 endedTrackId recibido:', endedTrackId);
+console.log('📦 Estado de queue[0]:', queue[0]);
+console.log('📦 Estado sdkReady:', sdkReady);
+console.log('📦 Estado sdkDeviceId:', sdkDeviceId);
+console.log('📦 Estado spotifyAccessToken:', !!spotifyAccessToken);
+console.log('📦 Estado sdkPlayerRef.current:', !!sdkPlayerRef.current);
+
 
     if (!endedTrackId) {
       console.warn('handleTrackEndNotification called without endedTrackId');
@@ -280,7 +287,9 @@ export default function AdminPage() {
 
         if (json.success) {
           console.log(`Backend notificado correctamente de la canción terminada: ${endedTrackId}.`);
-        } else {
+          console.log('✅ Respuesta backend /track-ended:', json);
+
+        }  else {
           console.error('Error al notificar al backend:', json.error);
           toast({ title: 'Error', description: 'Error al notificar al backend sobre el fin de la canción.', variant: 'destructive' });
         }
