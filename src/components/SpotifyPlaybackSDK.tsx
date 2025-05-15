@@ -50,7 +50,17 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
         if (player && isReady) {
           console.log("Intentando reproducir URI:", uri);
           try {
-            await player.play({ uris: [uri] });
+            const state = await player.getCurrentState();
+            if (!state || !state.device_id) throw new Error("No se pudo obtener el device_id actual.");
+
+            await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${state.device_id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ uris: [uri] }),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+              },
+            });
             console.log("Comando play enviado al SDK.");
           } catch (err: any) {
             console.error("Error al enviar comando play al SDK:", err);
@@ -217,6 +227,10 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
             setTimeout(() => { notificationLock.current = false; }, 5000);
           }
 
+          if (state.track_window?.next_tracks?.length > 0) {
+            console.warn("⚠️ Spotify ha planificado una canción siguiente que no está bajo nuestro control:", state.track_window.next_tracks[0]);
+          }
+
           if (currentPlaybackState && state && state.track_window.current_track.id !== currentPlaybackState.track_window.current_track.id) {
             console.log("Cambio de canción detectado, restableciendo notificationLock.");
             notificationLock.current = false;
@@ -266,17 +280,17 @@ const SpotifyPlaybackSDK = forwardRef<SpotifyPlaybackSDKRef, SpotifyPlaybackSDKP
         });
         setPlayer(spotifyPlayer); // Establecer el reproductor después de intentar conectar
       };
- window.onSpotifyWebPlaybackSDKReady = initializePlayer;
+      window.onSpotifyWebPlaybackSDKReady = initializePlayer;
 
       // Añade el script del SDK si no está ya presente
       if (!document.getElementById('spotify-playback-sdk')) {
         const script = document.createElement('script');
-script.id = 'spotify-playback-sdk';
-script.src = 'https://sdk.scdn.co/spotify-player.js';
-script.async = true;
-document.body.appendChild(script);
-scriptAdded = true;
-console.log("Script del Spotify Web Playback SDK añadido dinámicamente.");
+        script.id = 'spotify-playback-sdk';
+        script.src = 'https://sdk.scdn.co/spotify-player.js';
+        script.async = true;
+        document.body.appendChild(script);
+        scriptAdded = true;
+        console.log("Script del Spotify Web Playback SDK añadido dinámicamente.");
       } else {
         console.log("Script del Spotify Web Playback SDK ya presente.");
         if (window.Spotify && !player) {
@@ -316,4 +330,3 @@ console.log("Script del Spotify Web Playback SDK añadido dinámicamente.");
 SpotifyPlaybackSDK.displayName = 'SpotifyPlaybackSDK';
 
 export { SpotifyPlaybackSDK };
-
