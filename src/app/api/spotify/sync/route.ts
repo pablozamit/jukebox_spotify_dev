@@ -148,9 +148,28 @@ const enqueuedKey = `/admin/spotify/enqueuedTracks/${nextQueueSong.id}`;
 
 const alreadyEnqueuedSnap = await db.ref(enqueuedKey).once('value');
 if (alreadyEnqueuedSnap.exists()) {
-  console.log(`DEBUG: Canción ${nextQueueSong.id} ya encolada anteriormente. Se omite.`);
-  return NextResponse.json({ message: 'Track already enqueued recently' });
+  const timeSince = Date.now() - alreadyEnqueuedSnap.val().timestamp;
+  if (timeSince < 60_000) {
+    console.log(`DEBUG: Canción ${nextQueueSong.id} ya fue marcada como encolada hace ${timeSince} ms. Se omite.`);
+    return NextResponse.json({ message: 'Track already enqueued recently' });
+  } else {
+    console.warn(`DEBUG: Entrada encolada antigua. Reintentando encolar canción: ${nextQueueSong.id}`);
+  }
 }
+
+try {
+  await enqueueTrack(accessToken, trackUri, deviceId);
+  await db.ref(`/queue/${nextQueueSong.id}`).remove();
+  await db.ref(enqueuedKey).set({ timestamp: Date.now() });
+
+  console.log(`DEBUG: Canción añadida a cola Spotify y eliminada de Firebase: ${nextQueueSong.spotifyTrackId}`);
+  return NextResponse.json({ success: true, enqueued: nextQueueSong });
+} catch (err: any) {
+  await logError(err.response?.data || err.message || 'Error encolando canción en Spotify');
+  console.error("DEBUG: Error encolando canción:", err);
+  return NextResponse.json({ error: 'Error encolando canción: ' + err.message }, { status: 500 });
+}
+
 
 try {
   await db.ref(`/queue/${nextQueueSong.id}`).transaction((current) => {
