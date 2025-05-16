@@ -1,896 +1,413 @@
-'use client';
+export const runtime = 'nodejs';
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
-import { auth, db, isDbValid } from '@/lib/firebase';
-import { useToast } from '@/hooks/use-toast';
-import useSWR from 'swr';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter }ITA from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import {
-  ListMusic, Music, Trash2, ArrowUp, ArrowDown, Settings,
-  Search, Home, LogOut, AlertTriangle, RefreshCw, PlusCircle, ExternalLink, ListVideo
-} from 'lucide-react';
-import Image from 'next/image';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-interface QueueSong {
-  id: string;
-  spotifyTrackId: string;
-  title: string;
-  artist: string;
-  albumArtUrl?: string;
-  order?: number;
-  addedByUserId?: string;
-  timestampAdded: number;
-  votes?: number;
-}
 
-interface Song {
-  spotifyTrackId: string;
-  title: string;
-  artist: string;
-  albumArtUrl?: string;
-}
+import { NextResponse } from 'next/server';
 
-interface SpotifyConfig {
-  searchMode: 'playlist' | 'all';
-  playlistId?: string;
-  spotifyConnected?: boolean;
-}
+import axios from 'axios';
 
-interface PlaylistDetails {
-  name: string;
-  description: string;
-  imageUrl: string | null;
-  externalUrl?: string;
-}
+import * as admin from 'firebase-admin';
 
-interface SpotifyStatus {
-  spotifyConnected: boolean;
-  tokensOk: boolean;
-  playbackAvailable: boolean;
-  activeDevice?: { id: string; name: string; type: string };
-  message?: string;
-}
 
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Error al cargar datos.');
-  return res.json();
+
+const SPOTIFY_BASE_URL = 'https://api.spotify.com/v1';
+
+const SPOTIFY_API_TIMEOUT = 5000;
+
+const SYNC_LOCK_PATH = '/admin/spotify/syncLock';
+
+const LOCK_TIMEOUT_MS = 15000; // 15 segundos
+
+
+
+const httpClient = axios.create({ timeout: SPOTIFY_API_TIMEOUT });
+
+
+
+const getFirebaseApp = () => {
+
+  if (!admin.apps.length) {
+
+    const raw = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!);
+
+    admin.initializeApp({
+
+      credential: admin.credential.cert(raw),
+
+      databaseURL: process.env.FIREBASE_DATABASE_URL,
+
+    });
+
+  }
+
+  return admin.app();
+
 };
 
-export default function AdminPage() {
-  const router = useRouter();
-  const { toast } = useToast();
 
-  const [user, setUser] = useState<User | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-  const [queue, setQueue] = useState<QueueSong[]>([]);
-  const [isLoadingQueue, setIsLoadingQueue] = useState(true);
-  const [config, setConfig] = useState<SpotifyConfig>({ searchMode: 'all' });
-  const [playlistIdInput, setPlaylistIdInput] = useState('');
-  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
-  const [spotifyStatus, setSpotifyStatus] = useState<SpotifyStatus | null>(null);
-  const [spotifyAccessToken, setSpotifyAccessToken] = useState<string | null>(null);
-  const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
-  const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<Song[]>([]);
-  const [isLoadingSearch, setIsLoadingSearch] = useState(false);
 
-  const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 5000 });
+async function refreshTokenIfNeeded(tokens: any): Promise<string> {
 
-  // Sync Interval
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        console.log('[Jukebox Admin] Intentando llamar a /api/spotify/sync...');
-        const syncRes = await fetch('/api/spotify/sync', { method: 'POST' });
-        const syncJson = await syncRes.json();
+  const now = Date.now();
 
-        if (syncRes.status === 429) { // Código para "Too Many Requests" (lock activo)
-          console.log('[Jukebox Admin] /api/spotify/sync indica que ya hay una sincronización en progreso. Se reintentará en el próximo intervalo.');
-          return; // No es un error, simplemente el backend está ocupado.
-        }
+  if (tokens.expiresAt && tokens.expiresAt > now + 60_000) {
 
-        if (!syncRes.ok) {
-          console.error('[Jukebox Admin] Error en llamada periódica a /api/spotify/sync:', syncJson.error || syncJson.message);
-          toast({ title: 'Error de sincronización', description: syncJson.error || syncJson.message || 'No se pudo sincronizar con Spotify.', variant: 'destructive' });
-        } else {
-          console.log('[Jukebox Admin] /api/spotify/sync respuesta:', syncJson);
-          if (syncJson.success && syncJson.enqueued) {
-            // Solo refrescar si realmente se encoló algo
-            mutateCurrentPlaying(); 
-          }
-        }
-      } catch (error) {
-        console.error('[Jukebox Admin] Error en fetch periódico a /api/spotify/sync:', error);
-        toast({ title: 'Error de red', description: 'No se pudo conectar con el servidor de sincronización.', variant: 'destructive' });
-      }
-    }, 5000); // Intervalo de 5 segundos
+    return tokens.accessToken;
 
-    return () => clearInterval(interval);
-  }, [toast, mutateCurrentPlaying]);
+  }
 
-  // Authentication Check
-  useEffect(() => {
-    if (!auth) {
-      setLoadingAuth(false);
-      router.push('/admin/login');
-      return;
-    }
-    const unsub = onAuthStateChanged(auth, (current) => {
-      if (current) setUser(current);
-      else router.push('/admin/login');
-      setLoadingAuth(false);
-    });
-    return () => unsub();
-  }, [router]);
 
-  // Queue Listener
-  useEffect(() => {
-    if (!db || !user) {
-      setIsLoadingQueue(false);
-      return;
-    }
-    try {
-      const queueRef = ref(db, '/queue');
-      setIsLoadingQueue(true);
-      const unsub = onValue(queueRef, (snapshot) => {
-        try {
-          const data = snapshot.val() || {};
-          const items = Object.entries(data)
-            .map(([key, val]) => {
-              if (
-                !val ||
-                typeof val !== 'object' ||
-                typeof (val as any).title !== 'string' ||
-                typeof (val as any).artist !== 'string' ||
-                typeof (val as any).spotifyTrackId !== 'string'
-              ) {
-                return null;
-              }
-              return {
-                id: key,
-                ...(val as any),
-                order: (val as any).order ?? (val as any).timestampAdded ?? 0,
-                timestampAdded: (val as any).timestampAdded ?? 0
-              };
-            })
-            .filter((item): item is QueueSong => item !== null)
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-          setQueue(items);
-        } catch (error) {
-          console.error('Error processing queue data:', error);
-          toast({ title: 'Error', description: 'Error al procesar la cola de reproducción.' });
-        } finally {
-          setIsLoadingQueue(false);
-        }
-      });
-      return () => unsub();
-    } catch (error) {
-      console.error('Error in queue onValue setup:', error);
-    }
-  }, [user, toast]);
+  const refreshRes = await axios.post(
 
-  // Config Listener
-  useEffect(() => {
-    if (!db || !user) {
-      setIsLoadingConfig(false);
-      return;
-    }
-    try {
-      const cfgRef = ref(db, '/config');
-      setIsLoadingConfig(true);
-      const unsub = onValue(cfgRef, (snapshot) => {
-        try {
-          const data = snapshot.val() || { searchMode: 'all' };
-          setConfig({ searchMode: data.searchMode, playlistId: data.playlistId, spotifyConnected: data.spotifyConnected });
-          setPlaylistIdInput(data.playlistId || '');
-        } catch (error) {
-          console.error('Error processing config data:', error);
-          toast({ title: 'Error', description: 'Error al procesar la configuración.' });
-        } finally {
-          setIsLoadingConfig(false);
-        }
-      });
-      return () => unsub();
-    } catch (error) {
-      console.error('Error in config onValue setup:', error);
-    }
-  }, [user, toast]);
+    'https://accounts.spotify.com/api/token',
 
-  // Playlist Details Fetch
-  useEffect(() => {
-    if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
-      setPlaylistDetails(null);
-      setIsLoadingPlaylist(false);
-      return;
-    }
+    new URLSearchParams({
 
-    const fetchDetails = async () => {
-      setIsLoadingPlaylist(true);
-      try {
-        const res = await fetch(`/api/spotify/playlist-details?playlistId=${config.playlistId}`);
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || `Error ${res.status}`);
-        }
-        const data: PlaylistDetails = await res.json();
-        setPlaylistDetails(data);
-      } catch (error: any) {
-        console.error('Error fetching playlist details:', error);
-        setPlaylistDetails(null);
-        toast({
-          title: 'Error al Cargar Playlist',
-          description:
-            error.message === 'Playlist no encontrada'
-              ? 'La playlist configurada no existe o no es accesible.'
-              : 'No se pudo cargar la información de la playlist.',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLoadingPlaylist(false);
-      }
-    };
-    fetchDetails();
-  }, [config, toast]);
+      grant_type: 'refresh_token',
 
-  // Spotify Status Check
-  useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const res = await fetch('/api/spotify/status');
-        const json = await res.json();
-        if (
-          typeof json.spotifyConnected === 'boolean' &&
-          typeof json.tokensOk === 'boolean' &&
-          typeof json.playbackAvailable === 'boolean'
-        ) {
-          setSpotifyStatus(json as SpotifyStatus);
-        } else {
-          throw new Error('Respuesta de /api/spotify/status no tiene el formato esperado');
-        }
-        if (db && json.spotifyConnected) {
-          update(ref(db, '/config'), { spotifyConnected: true });
-        } else if (db && !json.spotifyConnected) {
-          update(ref(db, '/config'), { spotifyConnected: false });
-        }
-      } catch (e) {
-        console.error('Error al consultar estado de Spotify:', e);
-        setSpotifyStatus(null);
-        if (db) {
-          update(ref(db, '/config'), { spotifyConnected: false });
-        }
-      }
-    };
-    checkStatus();
-    const interval = setInterval(checkStatus, 10000);
-    return () => clearInterval(interval);
-  }, [db]);
+      refresh_token: tokens.refreshToken,
 
-  // Handle Track End Notification
-  const handleTrackEndNotification = async (endedTrackId: string | null) => {
-    console.log('Canción terminada, gestionando siguiente y notificando backend...');
+      client_id: process.env.SPOTIFY_CLIENT_ID!,
 
-    if (!endedTrackId) {
-      console.warn('handleTrackEndNotification called without endedTrackId');
-    }
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
 
-    // 1. Notificar al backend para eliminar la canción anterior
-    if (endedTrackId) {
-      try {
-        const res = await fetch('/api/playback/track-ended', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ endedTrackId }),
-        });
+    }),
 
-        const json = await res.json();
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
 
-        if (json.success) {
-          console.log(`Backend notificado correctamente de la canción terminada: ${endedTrackId}.`);
-        } else {
-          console.error('Error al notificar al backend:', json.error);
-          toast({ title: 'Error', description: 'Error al notificar al backend sobre el fin de la canción.', variant: 'destructive' });
-        }
-      } catch (error) {
-        console.error('Error en la llamada a /api/playback/track-ended:', error);
-        toast({ title: 'Error', description: 'Error de red al notificar al backend.', variant: 'destructive' });
-      }
-    } else {
-      console.warn('Skipping backend notification: No endedTrackId provided.');
-    }
+  );
 
-    // 2. Gestionar la siguiente canción de la cola (si existe)
-    const nextSong = queue[0]; // El primer elemento de la cola es el siguiente a sonar
 
-    if (nextSong) {
-      const trackUri = `spotify:track:${nextSong.spotifyTrackId}`;
-      if (!trackUri || !trackUri.startsWith('spotify:track:')) {
-        toast({
-          title: 'Error en URI',
-          description: 'La URI de la siguiente canción no es válida.',
-          variant: 'destructive',
-        });
-        return;
-      }
 
-      try {
-        // Notificar al backend para transferir la reproducción
-        await fetch('/api/spotify/transfer-playback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ trackUri }),
-        });
+  const newAccessToken = refreshRes.data.access_token;
 
-        toast({
-          title: '🎵 Reproduciendo siguiente canción',
-          description: `Ahora suena: ${nextSong.title}`,
-        });
-      } catch (error: any) {
-        console.error('Error al gestionar la siguiente canción:', error);
-        toast({ title: 'Error de Reproducción', description: `No se pudo reproducir ${nextSong.title}.`, variant: 'destructive' });
-      }
-    } else {
-      console.log('La cola está vacía. No hay siguiente canción para reproducir.');
-      toast({ title: 'Cola vacía', description: 'La cola de reproducción ha terminado.' });
-    }
+  const expiresIn = refreshRes.data.expires_in || 3600;
 
-    // Mutar SWR para actualizar "Ahora Suena"
-    mutateCurrentPlaying();
-  };
 
-  // Remove Song from Queue
-  const handleRemoveSong = async (songId: string) => {
-    if (!db) return;
-    try {
-      const songRef = ref(db, `/queue/${songId}`);
-      const songSnapshot = await get(songRef);
-      if (!songSnapshot.exists()) {
-        toast({ title: 'Error', description: 'La canción no existe en la cola.', variant: 'destructive' });
-        return;
-      }
-      await remove(songRef);
-      toast({ title: 'Canción eliminada', description: 'La canción ha sido eliminada de la cola.' });
-    } catch (e: any) {
-      console.error('Error eliminando canción:', e);
-      toast({ title: 'Error', description: 'No se pudo eliminar la canción.', variant: 'destructive' });
-    }
-  };
 
-  // Move Song in Queue
-  const handleMove = async (index: number, direction: -1 | 1) => {
-    if (!db) return;
-    const newQueue = [...queue];
-    const target = index + direction;
-    if (target < 0 || target >= newQueue.length) return;
-    [newQueue[index], newQueue[target]] = [newQueue[target], newQueue[index]];
+  const db = getFirebaseApp().database();
 
-    const updates: Record<string, any> = {};
-    newQueue.forEach((song, i) => {
-      updates[`/queue/${song.id}/order`] = i * 1000;
-    });
+  await db.ref('/admin/spotify/tokens').update({
 
-    try {
-      await update(ref(db), updates);
-      toast({ title: 'Orden actualizado', description: 'El orden de la canción ha cambiado.' });
-    } catch (error) {
-      console.error("Error updating queue order:", error);
-      toast({ title: 'Error', description: 'Error al actualizar el orden de la cola.' });
-    }
-  };
+    accessToken: newAccessToken,
 
-  // Spotify Connect/Disconnect
-  const handleSpotifyAction = async () => {
-    if (spotifyStatus?.spotifyConnected) {
-      try {
-        await fetch('/api/spotify/disconnect', { method: 'POST' });
-        setSpotifyStatus(prev => prev ? { ...prev, spotifyConnected: false, tokensOk: false, playbackAvailable: false } : null);
-        if (db) update(ref(db, '/config'), { spotifyConnected: false });
-        if (db) remove(ref(db, '/admin/spotify/tokens'));
-        toast({ title: "Spotify Desconectado", description: "Se han borrado los tokens de Spotify." });
-      } catch (e) {
-        toast({ title: "Error", description: "No se pudo desconectar Spotify.", variant: "destructive" });
-      }
-    } else {
-      window.location.href = '/api/spotify/connect';
-    }
-  };
+    expiresAt: now + expiresIn * 1000,
 
-  // Add Song to Queue
-  const handleAddSong = async (song: Song) => {
-    if (!db || !user) return;
+  });
 
-    const exists = queue.some((q) => q.spotifyTrackId === song.spotifyTrackId);
-    if (exists) {
-      toast({
-        title: 'Canción repetida',
-        description: 'Esa canción ya está en la cola.',
-        variant: 'destructive',
-      });
-      return;
-    }
 
-    const qRef = ref(db, '/queue');
-    const newRef = push(qRef);
-    const maxOrder = queue.length > 0 ? Math.max(...queue.map((i) => i.order ?? 0)) : 0;
 
-    await set(newRef, {
-      ...song,
-      timestampAdded: serverTimestamp(),
-      order: maxOrder + 1000,
-      addedByUserId: user?.uid || 'admin',
-      albumArtUrl: song.albumArtUrl || null,
-    });
+  return newAccessToken;
 
-    toast({
-      title: 'Canción añadida',
-      description: `${song.title} ha sido añadida a la cola por el admin.`,
-    });
-    setSearchTerm('');
-    setSearchResults([]);
-  };
+}
 
-  // Search Songs
-  const doSearch = useCallback(async () => {
-    if (!searchTerm.trim() || !config) {
-      setSearchResults([]);
-      return;
-    }
 
-    if (config.searchMode === 'playlist' && !config.playlistId) {
-      toast({
-        title: 'Playlist no configurada',
-        description: 'Primero configura una playlist.',
-        variant: 'destructive',
-      });
-      return;
-    }
 
-    setIsLoadingSearch(true);
-    try {
-      const params = new URLSearchParams({
-        q: searchTerm,
-        mode: config.searchMode,
-      });
-      if (config.searchMode === 'playlist' && config.playlistId) {
-        params.append('playlistId', config.playlistId);
-      }
+async function getActiveDeviceId(accessToken: string): Promise<string> {
 
-      const res = await fetch(`/api/searchSpotify?${params.toString()}`);
-      const data = await res.json();
-      const results = Array.isArray(data.results) ? data.results : [];
-      const songs: Song[] = Array.isArray(results)
-        ? results.map((t: any) => ({
-            spotifyTrackId: t.spotifyTrackId || t.id,
-            title: t.title || t.name,
-            artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-            albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-          }))
-        : [];
+  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
 
-      setSearchResults(songs);
-    } catch (e: any) {
-      console.error('Error búsqueda Spotify:', e);
-      toast({ title: 'Error', description: e.message });
-    } finally {
-      setIsLoadingSearch(false);
-    }
-  }, [searchTerm, config, toast]);
+    headers: { Authorization: `Bearer ${accessToken}` },
 
-  useEffect(() => {
-    const delay = setTimeout(() => {
-      if (searchTerm.trim()) {
-        doSearch();
-      } else {
-        setSearchResults([]);
-      }
-    }, 500);
-    return () => clearTimeout(delay);
-  }, [searchTerm, doSearch]);
+  });
 
-  // Load All Songs from Playlist
-  const handleLoadAllSongs = async () => {
-    if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
-      toast({
-        title: 'Error de Configuración',
-        description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    setIsLoadingSearch(true);
-    try {
-      const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}&limit=100`);
-      const data = await res.json();
-      const results = Array.isArray(data.results) ? data.results : [];
-      const songs: Song[] = Array.isArray(results)
-        ? results.map((t: any) => ({
-            spotifyTrackId: t.spotifyTrackId || t.id,
-            title: t.title || t.name,
-            artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-            albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-          }))
-        : [];
 
-      setSearchResults(songs);
-    } catch (e: any) {
-      toast({ title: 'Error al cargar', description: e.message });
-    } finally {
-      setIsLoadingSearch(false);
-    }
-  };
 
-  // Save Config
-  const handleConfigSave = async () => {
-    if (!db) return;
-    try {
-      await update(ref(db, '/config'), {
-        searchMode: config.searchMode,
-        playlistId: playlistIdInput.trim() || null,
-      });
-      toast({ title: 'Configuración guardada', description: 'Los cambios se han guardado correctamente.' });
-    } catch (error) {
-      console.error("Error saving config:", error);
-      toast({ title: 'Error', description: 'No se pudo guardar la configuración.', variant: 'destructive' });
-    }
-  };
+  const device = res.data.devices.find((d: any) => d.is_active) || res.data.devices[0];
 
-  // Clear Queue
-  const handleClearQueue = async () => {
-    if (!db) return;
-    const isConfirmed = window.confirm("¿Estás seguro de que quieres vaciar completamente la cola? Esta acción no se puede deshacer.");
-    if (!isConfirmed) return;
+  if (!device?.id) throw new Error('No active Spotify devices found');
 
-    setIsLoadingQueue(true);
-    try {
-      const queueRef = ref(db, '/queue');
-      await remove(queueRef);
-      toast({
-        title: 'Cola Vaciada',
-        description: 'Se ha eliminado toda la cola de reproducción.',
-      });
-    } catch (error: any) {
-      console.error('Error clearing queue:', error);
-      toast({ title: 'Error', description: 'No se pudo vaciar la cola.', variant: 'destructive' });
-    } finally {
-      setIsLoadingQueue(false);
-    }
-  };
+  return device.id;
 
-  if (loadingAuth || isLoadingConfig) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Cargando panel de administración...</p>
-      </div>
-    );
-  }
+}
 
-  if (!user) {
-    return null;
-  }
 
-  return (
-    <div className="container mx-auto p-4 flex flex-col min-h-screen">
-      <div className="flex flex-col md:flex-row gap-6 flex-1">
-        {/* Columna principal */}
-        <div className="flex-1 space-y-6">
-          {/* ── Ahora Suena ── */}
-          <Card className="shadow-lg rounded-lg border border-border/70">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-                <Music className="h-5 w-5" /> Ahora Suena
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {currentPlaying && currentPlaying.title ? (
-                <div className="flex gap-4 items-center">
-                  <Image
-                    src={currentPlaying.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.spotifyTrackId}/64`}
-                    alt={currentPlaying.title}
-                    width={64}
-                    height={64}
-                    className="rounded-md shadow-md"
-                  />
-                  <div className="flex-1 overflow-hidden">
-                    <p className="font-semibold truncate">{currentPlaying.title}</p>
-                    <p className="text-sm text-muted-foreground truncate">{currentPlaying.artist}</p>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* ── Lista de la Cola ── */}
-          <Card className="shadow-lg rounded-lg border border-border/70">
-            <CardHeader>
-              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-                <ListMusic className="h-5 w-5" /> Cola de Reproducción ({queue.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-96">
-                {isLoadingQueue ? (
-                  <div className="p-4 space-y-3">
-                    {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-md" />)}
-                  </div>
-                ) : queue.length > 0 ? (
-                  <div className="divide-y divide-border">
-                    {queue.map((song, idx) => (
-                      <div key={song.id} className="flex items-center gap-3 p-3 hover:bg-secondary/20 transition-colors">
-                        <span className="w-5 text-sm text-center text-muted-foreground font-medium">{idx + 1}</span>
-                        {song.albumArtUrl ? (
-                          <Image src={song.albumArtUrl} alt={song.title} width={40} height={40} className="h-10 w-10 rounded object-cover shadow-sm" data-ai-hint="song album" />
-                        ) : (
-                          <div className="h-10 w-10 bg-muted rounded flex items-center justify-center shadow-sm">
-                            <Music className="h-5 w-5 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div className="flex-1 overflow-hidden">
-                          <p className="truncate font-medium text-sm">{song.title}</p>
-                          <p className="truncate text-xs text-muted-foreground">{song.artist}</p>
-                        </div>
-                        <div className="flex gap-1.5">
-                          <TooltipProvider delayDuration={100}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, -1)} disabled={idx === 0}><ArrowUp /></Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>Mover Arriba</p></TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 1)} disabled={idx === queue.length - 1}><ArrowDown /></Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>Mover Abajo</p></TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => handleRemoveSong(song.id)}><Trash2 /></Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>Eliminar Canción</p></TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-4">
-                    <p className="text-center text-muted-foreground py-10 italic">La cola está vacía.</p>
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
+async function getPlaybackState(accessToken: string): Promise<any | null> {
 
-          {/* ── Buscador de canciones ── */}
-          <Card className="shadow-lg rounded-lg border border-border/70">
-            <CardHeader>
-              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-                <Search className="h-5 w-5" /> Añadir Canciones
-              </CardTitle>
-              {config.searchMode === 'playlist' && playlistDetails && (
-                <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-                  <ListVideo className="h-4 w-4" />
-                  Playlist:
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <a
-                          href={playlistDetails.externalUrl || '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium hover:underline truncate max-w-[200px]"
-                        >
-                          {playlistDetails.name}
-                        </a>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{playlistDetails.name}</p>
-                        {playlistDetails.description && <p className="text-xs text-muted-foreground">{playlistDetails.description}</p>}
-                        {playlistDetails.externalUrl && <p className="text-xs text-accent underline mt-1">Abrir en Spotify</p>}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2 mb-4">
-                <Input
-                  placeholder="Nombre de canción o artista..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="flex-grow"
-                  disabled={isLoadingSearch || (config.searchMode === 'playlist' && !config.playlistId)}
-                />
-                {config.searchMode === 'playlist' && config.playlistId && (
-                  <Button onClick={handleLoadAllSongs} disabled={isLoadingSearch || !config.playlistId}>
-                    {isLoadingSearch && searchTerm === '' ? <RefreshCw className="animate-spin h-4 w-4" /> : <ListMusic className="h-4 w-4" />}
-                    <span className="ml-2 hidden sm:inline">Ver Todas</span>
-                  </Button>
-                )}
-              </div>
-              <ScrollArea className="h-72 border rounded-md">
-                <div className="p-2 space-y-1">
-                  {isLoadingSearch ? (
-                    [...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)
-                  ) : searchResults.length > 0 ? (
-                    searchResults.map((song) => (
-                      <div
-                        key={song.spotifyTrackId}
-                        className="flex items-center justify-between p-2 rounded-md hover:bg-secondary/20 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 overflow-hidden flex-1">
-                          {song.albumArtUrl ? (
-                            <Image src={song.albumArtUrl} width={32} height={32} className="w-8 h-8 rounded object-cover" alt={song.title} data-ai-hint="song album" />
-                          ) : (
-                            <div className="w-8 h-8 bg-muted flex items-center justify-center rounded">
-                              <Music className="text-muted-foreground h-4 w-4" />
-                            </div>
-                          )}
-                          <div className="truncate">
-                            <p className="font-medium text-sm truncate">{song.title}</p>
-                            <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
-                          </div>
-                        </div>
-                        <TooltipProvider delayDuration={100}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAddSong(song)} disabled={queue.some(s => s.spotifyTrackId === song.spotifyTrackId)}>
-                                <PlusCircle />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>{queue.some(s => s.spotifyTrackId === song.spotifyTrackId) ? 'Ya en cola' : 'Añadir a la cola'}</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </div>
-                    ))
-                  ) : searchTerm ? (
-                    <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
-                  ) : (
-                    <p className="text-center text-sm text-muted-foreground py-4 italic">
-                      {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
-                    </p>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
+  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
 
-        {/* Columna lateral */}
-        <div className="w-full md:w-96 space-y-6">
-          <Card className="shadow-lg rounded-lg border border-border/70">
-            <CardHeader>
-              <CardTitle className="text-xl font-semibold text-primary flex items-center gap-2">
-                <Settings className="h-5 w-5" /> Configuración
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <Label htmlFor="search-mode-toggle" className="text-base font-medium mb-2 block">Modo de Búsqueda</Label>
-                <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
-                  <Switch
-                    id="search-mode-toggle"
-                    checked={config.searchMode === 'playlist'}
-                    onCheckedChange={(checked) => {
-                      setConfig(prev => ({ ...prev, searchMode: checked ? 'playlist' : 'all' }));
-                    }}
-                    aria-label="Cambiar modo de búsqueda"
-                  />
-                  <Label htmlFor="search-mode-toggle" className="cursor-pointer flex-1">
-                    {config.searchMode === 'playlist' ? 'Solo en Playlist Especificada' : 'En todo Spotify'}
-                  </Label>
-                </div>
-              </div>
+    headers: { Authorization: `Bearer ${accessToken}` },
 
-              {config.searchMode === 'playlist' && (
-                <div>
-                  <Label htmlFor="playlist-id-input" className="text-base font-medium mb-2 block">ID de la Playlist de Spotify</Label>
-                  <Input
-                    id="playlist-id-input"
-                    placeholder="Ej: 37i9dQZF1DXcBWIGoYBM5M"
-                    value={playlistIdInput}
-                    onChange={(e) => setPlaylistIdInput(e.target.value)}
-                    className="text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">Pega el ID de la playlist de Spotify aquí.</p>
-                </div>
-              )}
-              <Button onClick={handleConfigSave} className="w-full mt-2">
-                Guardar Configuración
-              </Button>
+  });
 
-              <hr className="my-4 border-border" />
 
-              <div>
-                <Label className="text-base font-medium mb-2 block">Conexión con Spotify</Label>
-                <Button
-                  onClick={handleSpotifyAction}
-                  variant={
-                    spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk && spotifyStatus?.playbackAvailable
-                      ? 'default'
-                      : spotifyStatus?.spotifyConnected && spotifyStatus?.tokensOk
-                      ? 'secondary'
-                      : 'destructive'
-                  }
-                  className="w-full"
-                >
-                  {spotifyStatus?.spotifyConnected ? <><LogOut className="mr-2 h-4 w-4" /> Desconectar Spotify</> : <><ExternalLink className="mr-2 h-4 w-4" /> Conectar Spotify</>}
-                </Button>
-                {spotifyStatus && (
-                  <div className="mt-2 text-xs space-y-0.5 p-2 border rounded-md bg-muted/30">
-                    <p>Conectado: {spotifyStatus.spotifyConnected ? 'Sí ✅' : 'No ❌'}</p>
-                    <p>Tokens válidos: {spotifyStatus.tokensOk ? 'Sí ✅' : 'No ❌'}</p>
-                    <p>Reproducción activa: {spotifyStatus.playbackAvailable ? `Sí en "${spotifyStatus.activeDevice?.name || 'dispositivo desconocido'}" ✅` : 'No ⚠️'}</p>
-                    {spotifyStatus.message && <p className="italic text-destructive/80">{spotifyStatus.message}</p>}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-            <CardFooter className="flex flex-col gap-2 pt-4 border-t">
-              <Button variant="outline" disabled className="w-full opacity-80 cursor-default">
-                🗳️ Modo Votos: Off
-              </Button>
 
-              <Button variant="outline" onClick={() => router.push('/')} className="w-full">
-                <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
-              </Button>
-              <Button variant="outline" onClick={() => auth && signOut(auth)} className="w-full">
-                <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={async () => {
-                  if (!db) return;
-                  const isConfirmed = window.confirm("¿Estás seguro de que quieres forzar la sincronización? Esto intentará reproducir la siguiente canción de la cola.");
-                  if (!isConfirmed) return;
+  if (res.status === 204) {
 
-                  toast({ title: "⏳ Forzando sincronización...", description: "Intentando reproducir la siguiente canción." });
-                  await handleTrackEndNotification(null); // Simulate track end to trigger next song
-                  toast({
-                    title: '🎵 Reproducción Forzada',
-                    description: 'Se intentó reproducir la siguiente canción.',
-                  });
-                  mutateCurrentPlaying(); // Refresh current playing info
-                }}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" /> Forzar Sincronización
-              </Button>
-              <Button
-                variant="destructive"
-                className="w-full"
-                onClick={handleClearQueue}
-                disabled={queue.length === 0 || isLoadingQueue}
-              >
-                {isLoadingQueue ? <RefreshCw className="animate-spin mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                Vaciar Cola ({queue.length})
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-      </div>
-      <footer className="w-full text-center text-muted-foreground text-sm p-4 mt-auto">
-        Version: {process.env.NEXT_PUBLIC_APP_VERSION}
-      </footer>
-    </div>
-  );
+    return null;
+
+  } else if (res.status !== 200) {
+
+    throw new Error(`Spotify API returned status ${res.status} for playback state`);
+
+  }
+
+
+
+  return res.data;
+
+}
+
+
+
+async function enqueueTrack(accessToken: string, trackUri: string, deviceId?: string) {
+
+  const url = `${SPOTIFY_BASE_URL}/me/player/queue`;
+
+  const params = new URLSearchParams({ uri: trackUri });
+
+  if (deviceId) params.append('device_id', deviceId);
+
+
+
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+
+
+  await httpClient.post(`${url}?${params}`, {}, { headers });
+
+}
+
+
+
+async function getNextTrack(db: admin.database.Database): Promise<any | null> {
+
+  console.log("DEBUG: Intentando obtener siguiente canción de la cola");
+
+  const snap = await db.ref('/queue').once('value');
+
+  const queue = snap.val() || {};
+
+
+
+  const songs = Object.entries(queue).map(([id, val]: any) => ({
+
+    id,
+
+    ...val,
+
+    order: val.order ?? val.timestampAdded ?? 0,
+
+    spotifyTrackId: val.spotifyTrackId ?? val.id,
+
+  }));
+
+
+
+  songs.sort((a, b) => a.order - b.order);
+
+  return songs[0] || null;
+
+}
+
+
+
+async function logError(message: string) {
+
+  const db = getFirebaseApp().database();
+
+  await db.ref('/admin/spotify/lastError').set({
+
+    message,
+
+    timestamp: Date.now(),
+
+  });
+
+}
+
+
+
+export async function POST() {
+
+  const db = getFirebaseApp().database();
+
+  const lockRef = db.ref(SYNC_LOCK_PATH);
+
+  let lockAcquired = false;
+
+
+
+  try {
+
+    // 1. Intentar adquirir el lock
+
+    const transactionResult = await lockRef.transaction((currentData) => {
+
+      const now = Date.now();
+
+      if (currentData === null || !currentData.active || (now - currentData.timestamp > LOCK_TIMEOUT_MS)) {
+
+        return { active: true, timestamp: now, by: 'sync-route-v2' };
+
+      }
+
+      return; // Abortar transacción, lock ocupado
+
+    });
+
+
+
+    if (!transactionResult.committed || !transactionResult.snapshot?.val()?.active) {
+
+      console.log("DEBUG: Sincronización ya en progreso o lock falló. Saliendo.");
+
+      return NextResponse.json({ message: 'Sync already in progress or lock failed.' }, { status: 429 });
+
+    }
+
+    lockAcquired = true;
+
+    console.log("DEBUG: Lock de sincronización adquirido.");
+
+
+
+    // --- LÓGICA DE SINCRONIZACIÓN ---
+
+    const tokensSnap = await db.ref('/admin/spotify/tokens').once('value');
+
+    const tokens = tokensSnap.val();
+
+
+
+    if (!tokens?.refreshToken) {
+
+      await logError('No tokens found in database for sync');
+
+      return NextResponse.json({ error: 'No tokens found' }, { status: 400 });
+
+    }
+
+
+
+    const accessToken = await refreshTokenIfNeeded(tokens);
+
+    const deviceId = await getActiveDeviceId(accessToken);
+
+    console.log("DEBUG: Device ID:", deviceId);
+
+
+
+    const playbackState = await getPlaybackState(accessToken);
+
+    const nextQueueSong = await getNextTrack(db);
+
+
+
+    if (!nextQueueSong) {
+
+      console.log("DEBUG: No hay canciones en la cola Firebase.");
+
+      return NextResponse.json({ message: 'No tracks in Firebase queue' });
+
+    }
+
+
+
+    let shouldEnqueue = false;
+
+    if (playbackState && playbackState.item && playbackState.is_playing) {
+
+      const remainingTime = playbackState.item.duration_ms - playbackState.progress_ms;
+
+      if (remainingTime <= 10_000) {
+
+        console.log(`DEBUG: Quedan ${remainingTime/1000}s. Se debe encolar.`);
+
+        shouldEnqueue = true;
+
+      } else {
+
+        console.log(`DEBUG: Más de 10 segundos restantes (${remainingTime/1000}s). No se encola.`);
+
+      }
+
+    } else if (!playbackState || !playbackState.item || !playbackState.is_playing) {
+
+      console.log("DEBUG: No hay canción sonando activamente o playbackState incompleto. Se intentará encolar la siguiente de Firebase.");
+
+      shouldEnqueue = true;
+
+    }
+
+
+
+    if (!shouldEnqueue) {
+
+      return NextResponse.json({ message: 'Conditions to enqueue not met (e.g. song still has enough time or is paused).' });
+
+    }
+
+
+
+    // --- Lógica de encolar y eliminar la PRIMERA canción ---
+
+    const trackUri = `spotify:track:${nextQueueSong.spotifyTrackId}`;
+
+    const firebaseQueuePath = `/queue/${nextQueueSong.id}`;
+
+
+
+    await enqueueTrack(accessToken, trackUri, deviceId);
+
+    console.log(`DEBUG: Canción ${nextQueueSong.id} (${trackUri}) añadida a cola Spotify.`);
+
+
+
+    // Eliminar la canción de la cola de Firebase
+
+    await db.ref(firebaseQueuePath).remove();
+
+    console.log(`DEBUG: Canción ${nextQueueSong.id} eliminada de Firebase queue.`);
+
+
+
+    // Actualizar el ID de la canción que ahora está "sonando"
+
+    await db.ref('/admin/spotify/nowPlayingId').set({
+
+      id: nextQueueSong.spotifyTrackId,
+
+      title: nextQueueSong.title || "N/A",
+
+      artist: nextQueueSong.artist || "N/A",
+
+      source: 'jukebox-sync',
+
+      timestamp: Date.now(),
+
+    });
+
+    console.log(`DEBUG: nowPlayingId actualizado en Firebase a ${nextQueueSong.spotifyTrackId}.`);
+
+
+
+    return NextResponse.json({ success: true, enqueued: nextQueueSong });
+
+
+
+  } catch (err: any) {
+
+    await logError(err.response?.data?.error?.message || err.message || 'Unknown error in sync POST handler');
+
+    console.error("DEBUG: Error en la función POST de sincronización:", err);
+
+    return NextResponse.json({ error: 'Error: ' + (err.message || 'desconocido') }, { status: err.response?.status || 500 });
+
+  } finally {
+
+    // 2. Liberar el lock
+
+    if (lockAcquired) {
+
+      await lockRef.update({ active: false, releasedTimestamp: Date.now() });
+
+      console.log("DEBUG: Lock de sincronización liberado.");
+
+    }
+
+  }
+
 }
