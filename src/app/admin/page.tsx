@@ -90,58 +90,35 @@ export default function AdminPage() {
 
   // Sync Interval
   useEffect(() => {
-    const callSync = async () => {
+    const interval = setInterval(async () => {
       try {
-        console.log('[Jukebox] AdminPage: Calling /api/spotify/sync...');
+        console.log('[Jukebox Admin] Intentando llamar a /api/spotify/sync...');
         const syncRes = await fetch('/api/spotify/sync', { method: 'POST' });
-        const syncJson = await syncRes.json(); // Intenta parsear JSON siempre
+        const syncJson = await syncRes.json();
+
+        if (syncRes.status === 429) { // Código para "Too Many Requests" (lock activo)
+          console.log('[Jukebox Admin] /api/spotify/sync indica que ya hay una sincronización en progreso. Se reintentará en el próximo intervalo.');
+          return; // No es un error, simplemente el backend está ocupado.
+        }
 
         if (!syncRes.ok) {
-          // Errores HTTP (4xx, 5xx)
-          console.error('[Jukebox] AdminPage: Error response from /api/spotify/sync:', syncJson);
-          if (syncJson.error) { // Si el backend envió un campo 'error'
-            toast({ 
-              title: `Error de Sincronización (${syncRes.status})`, 
-              description: syncJson.error, 
-              variant: 'destructive' 
-            });
-          } else {
-            toast({ 
-              title: `Error de Sincronización (${syncRes.status})`, 
-              description: 'Respuesta no exitosa del servidor al sincronizar.', 
-              variant: 'destructive' 
-            });
-          }
+          console.error('[Jukebox Admin] Error en llamada periódica a /api/spotify/sync:', syncJson.error || syncJson.message);
+          toast({ title: 'Error de sincronización', description: syncJson.error || syncJson.message || 'No se pudo sincronizar con Spotify.', variant: 'destructive' });
         } else {
-          // Respuestas Exitosas (2xx)
-          console.log('[Jukebox] AdminPage: Success response from /api/spotify/sync:', syncJson);
+          console.log('[Jukebox Admin] /api/spotify/sync respuesta:', syncJson);
           if (syncJson.success && syncJson.enqueued) {
-            toast({
-              title: '🎵 Sincronización Exitosa',
-              description: `"${syncJson.enqueued.title}" añadida a la cola de Spotify y actualizada en Jukebox.`,
-            });
-            mutateCurrentPlaying(); // Refrescar "Ahora Suena" si algo se encoló.
-          } else if (syncJson.message && syncJson.message !== 'No tracks in queue' && syncJson.message !== 'Song still playing, no enqueue yet.') {
-            // Otros mensajes informativos del backend que no son errores ni encolamientos directos
-            console.log(`[Jukebox] AdminPage: Info message from /api/spotify/sync: ${syncJson.message}`);
-            // Podrías poner un toast informativo si quisieras para ciertos mensajes.
-            // toast({ title: 'Info Sincronización', description: syncJson.message });
+            // Solo refrescar si realmente se encoló algo
+            mutateCurrentPlaying(); 
           }
         }
-      } catch (error: any) {
-        console.error('[Jukebox] AdminPage: Network or parsing error calling /api/spotify/sync:', error);
-        toast({ 
-          title: 'Error de Red o Conexión', 
-          description: `No se pudo comunicar con el servidor de sincronización. ${error.message || ''}`, 
-          variant: 'destructive' 
-        });
+      } catch (error) {
+        console.error('[Jukebox Admin] Error en fetch periódico a /api/spotify/sync:', error);
+        toast({ title: 'Error de red', description: 'No se pudo conectar con el servidor de sincronización.', variant: 'destructive' });
       }
-    };
+    }, 5000); // Intervalo de 5 segundos
 
-    const intervalId = setInterval(callSync, 7000); // Intervalo ligeramente mayor (7s) para dar más margen.
-
-    return () => clearInterval(intervalId);
-  }, [mutateCurrentPlaying, toast]);
+    return () => clearInterval(interval);
+  }, [toast, mutateCurrentPlaying]);
 
   // Authentication Check
   useEffect(() => {
@@ -786,7 +763,7 @@ export default function AdminPage() {
                       </div>
                     ))
                   ) : searchTerm ? (
-                    <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
+                    <p className="text-center text-sm text-muted-foreground py-4                                              italic">No se encontraron resultados para "{searchTerm}".</p>
                   ) : (
                     <p className="text-center text-sm text-muted-foreground py-4 italic">
                       {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
