@@ -162,18 +162,25 @@ export async function POST() {
     }
 
     let shouldEnqueue = false;
-    if (playbackState && playbackState.item && playbackState.is_playing) {
-      const remainingTime = playbackState.item.duration_ms - playbackState.progress_ms;
-      if (remainingTime <= 10_000) {
-        console.log(`[SYNC ${operationId}] Quedan ${remainingTime/1000}s. Se debe encolar.`);
-        shouldEnqueue = true;
-      } else {
-        console.log(`[SYNC ${operationId}] Más de 10 segundos restantes (${remainingTime/1000}s). No se encola.`);
-      }
-    } else if (!playbackState || !playbackState.item || !playbackState.is_playing) {
-      console.log(`[SYNC ${operationId}] No hay canción sonando activamente o playbackState incompleto. Se intentará encolar la siguiente de Firebase.`);
+
+if (playbackState && playbackState.item) {
+  const remainingTime = playbackState.item.duration_ms - playbackState.progress_ms;
+
+  if (playbackState.is_playing) {
+    if (remainingTime <= 10_000) {
+      console.log(`[SYNC ${operationId}] Quedan ${remainingTime / 1000}s y está sonando. Se debe encolar.`);
       shouldEnqueue = true;
+    } else {
+      console.log(`[SYNC ${operationId}] Más de 10s restantes (${remainingTime / 1000}s). No se encola.`);
     }
+  } else {
+    console.log(`[SYNC ${operationId}] Está pausado pero con canción cargada. No se encola.`);
+  }
+} else {
+  console.log(`[SYNC ${operationId}] No hay canción activa. Se debe encolar la primera de Firebase.`);
+  shouldEnqueue = true;
+}
+
 
     if (!shouldEnqueue) {
       return NextResponse.json({ message: 'Conditions to enqueue not met (e.g. song still has enough time or is paused).' });
