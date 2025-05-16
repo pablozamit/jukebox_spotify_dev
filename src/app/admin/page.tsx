@@ -88,70 +88,60 @@ export default function AdminPage() {
 
   const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 5000 });
 
+  // Sync Interval
   useEffect(() => {
-    const interval = setInterval(async () => {
-      // Llama al endpoint de sincronización PERIÓDICAMENTE
+    const callSync = async () => {
       try {
-        console.log('[Jukebox] Llamando a /api/spotify/sync periódicamente...');
+        console.log('[Jukebox] AdminPage: Calling /api/spotify/sync...');
         const syncRes = await fetch('/api/spotify/sync', { method: 'POST' });
-        const syncJson = await syncRes.json();
+        const syncJson = await syncRes.json(); // Intenta parsear JSON siempre
+
         if (!syncRes.ok) {
-          console.error('[Jukebox] Error en llamada periódica a /api/spotify/sync:', syncJson.error);
-          toast({ title: 'Error de sincronización', description: syncJson.error || 'No se pudo sincronizar con Spotify.', variant: 'destructive' });
-        } else {
-          console.log('[Jukebox] /api/spotify/sync response:', syncJson);
-          // Refresca la información de "Ahora Suena" después de un sync exitoso
-          mutateCurrentPlaying();
-        }
-      } catch (error) {
-        console.error('[Jukebox] Error en fetch periódico a /api/spotify/sync:', error);
-        toast({ title: 'Error de red', description: 'No se pudo conectar con el servidor de sincronización.', variant: 'destructive' });
-      }
-
-      // --- Lógica original mantenida como fallback, pero comentada ---
-      /*
-      const progressMs = currentPlaying?.progress_ms;
-      const durationMs = currentPlaying?.item?.duration_ms;
-      const currentTrackId = currentPlaying?.item?.id;
-
-      if (!progressMs || !durationMs || !currentTrackId || queue.length === 0) return;
-
-      const remaining = durationMs - progressMs;
-      if (remaining <= 8000) {
-        console.log(`[Jukebox] (Frontend Detector) Quedan ${remaining}ms para que termine ${currentTrackId}`);
-        const firstInQueue = queue[0];
-        if (!firstInQueue) return;
-
-        try {
-          const res = await fetch('/api/spotify/add-to-queue', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ trackUri: `spotify:track:${firstInQueue.spotifyTrackId}` }),
-          });
-
-          if (!res.ok) throw new Error('No se pudo añadir la canción a la cola de Spotify');
-
-          console.log(`[Jukebox] Añadida a Spotify Queue: ${firstInQueue.title}`);
-
-          // ELIMINAR la canción que acaba de empezar a sonar de la cola Firebase
-          if (!db) {
-            console.error('Firebase database no está inicializado');
-            return;
+          // Errores HTTP (4xx, 5xx)
+          console.error('[Jukebox] AdminPage: Error response from /api/spotify/sync:', syncJson);
+          if (syncJson.error) { // Si el backend envió un campo 'error'
+            toast({ 
+              title: `Error de Sincronización (${syncRes.status})`, 
+              description: syncJson.error, 
+              variant: 'destructive' 
+            });
+          } else {
+            toast({ 
+              title: `Error de Sincronización (${syncRes.status})`, 
+              description: 'Respuesta no exitosa del servidor al sincronizar.', 
+              variant: 'destructive' 
+            });
           }
-          const songRef = ref(db, `/queue/${firstInQueue.id}`);
-          await remove(songRef);
-          
-          console.log(`[Jukebox] Eliminada de Firebase Queue: ${firstInQueue.title}`);
-
-        } catch (err) {
-          console.error('Error añadiendo canción a la cola de Spotify o eliminándola de Firebase:', err);
+        } else {
+          // Respuestas Exitosas (2xx)
+          console.log('[Jukebox] AdminPage: Success response from /api/spotify/sync:', syncJson);
+          if (syncJson.success && syncJson.enqueued) {
+            toast({
+              title: '🎵 Sincronización Exitosa',
+              description: `"${syncJson.enqueued.title}" añadida a la cola de Spotify y actualizada en Jukebox.`,
+            });
+            mutateCurrentPlaying(); // Refrescar "Ahora Suena" si algo se encoló.
+          } else if (syncJson.message && syncJson.message !== 'No tracks in queue' && syncJson.message !== 'Song still playing, no enqueue yet.') {
+            // Otros mensajes informativos del backend que no son errores ni encolamientos directos
+            console.log(`[Jukebox] AdminPage: Info message from /api/spotify/sync: ${syncJson.message}`);
+            // Podrías poner un toast informativo si quisieras para ciertos mensajes.
+            // toast({ title: 'Info Sincronización', description: syncJson.message });
+          }
         }
+      } catch (error: any) {
+        console.error('[Jukebox] AdminPage: Network or parsing error calling /api/spotify/sync:', error);
+        toast({ 
+          title: 'Error de Red o Conexión', 
+          description: `No se pudo comunicar con el servidor de sincronización. ${error.message || ''}`, 
+          variant: 'destructive' 
+        });
       }
-      */
-    }, 5000); // Intervalo de 5 segundos
+    };
 
-    return () => clearInterval(interval);
-  }, [currentPlaying, queue, mutateCurrentPlaying, toast, db]);
+    const intervalId = setInterval(callSync, 7000); // Intervalo ligeramente mayor (7s) para dar más margen.
+
+    return () => clearInterval(intervalId);
+  }, [mutateCurrentPlaying, toast]);
 
   // Authentication Check
   useEffect(() => {

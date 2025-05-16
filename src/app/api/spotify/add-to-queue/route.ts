@@ -20,11 +20,11 @@ const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 
 export async function POST(request: Request) {
   try {
-    // Leer body con el trackId
-    const { trackId } = await request.json();
+    // Leer body con el spotifyTrackId
+    const { spotifyTrackId } = await request.json();
 
-    if (!trackId) {
-      return NextResponse.json({ error: 'trackId is required' }, { status: 400 });
+    if (!spotifyTrackId) {
+      return NextResponse.json({ error: 'spotifyTrackId is required' }, { status: 400 });
     }
 
     // Leer tokens desde Firebase
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
 
     // Encolar la canción en Spotify
     const queueRes = await fetch(
-      `https://api.spotify.com/v1/me/player/queue?uri=spotify:track:${trackId}`,
+      `https://api.spotify.com/v1/me/player/queue?uri=spotify:track:${spotifyTrackId}`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -87,12 +87,48 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    console.log(`Successfully added ${spotifyTrackId} to Spotify queue.`);
+
+    // --- Start: Firebase Cleanup Logic ---
+    try {
+      const db = admin.database();
+      const queueRef = db.ref('/queue');
+
+      // Query for entries matching the spotifyTrackId
+      const snapshot = await queueRef.orderByChild('spotifyTrackId').equalTo(spotifyTrackId).once('value');
+
+      if (snapshot.exists()) {
+        console.log(`Found matching entries in Firebase queue for ${spotifyTrackId}. Removing...`);
+        const updates: any = {};
+        snapshot.forEach((childSnapshot) => {
+          // Prepare updates object to remove each matching entry
+          updates[childSnapshot.key!] = null; // Setting to null effectively removes in update()
+          console.log(`Marking ${childSnapshot.key} for removal from Firebase queue.`);
+        });
+
+        // Perform the removal of all matching entries
+        await queueRef.update(updates);
+        console.log(`Finished removing matching entries from Firebase queue for ${spotifyTrackId}.`);
+      } else {
+        console.log(`No matching entries found in Firebase queue for ${spotifyTrackId}. No cleanup needed.`);
+      }
+
+    } catch (firebaseCleanupError) {
+      console.error(`Error during Firebase queue cleanup for ${spotifyTrackId}:`, firebaseCleanupError);
+      // Log this error, but the Spotify add was successful, so we can still return success.
+    }
+    // --- End: Firebase Cleanup Logic ---
+
+    return NextResponse.json({ success: true, message: 'Song added to Spotify and Firebase queue cleaned.' });
+
   } catch (e: any) {
     console.error('add-to-queue error:', e);
+    // Improved error response
+    const errorMessage = e.response?.data?.error?.message || e.message || 'Internal server error';
+    const status = e.response?.status || 500;
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: `Error adding song: ${errorMessage}` },
+      { status: status }
     );
   }
 }
