@@ -1,413 +1,217 @@
+// ➤ Fuerza este handler a ejecutarse en Node.js, no en Edge
 export const runtime = 'nodejs';
 
-
-
 import { NextResponse } from 'next/server';
-
 import axios from 'axios';
-
 import * as admin from 'firebase-admin';
-
-
+import crypto from 'crypto';
 
 const SPOTIFY_BASE_URL = 'https://api.spotify.com/v1';
-
 const SPOTIFY_API_TIMEOUT = 5000;
-
 const SYNC_LOCK_PATH = '/admin/spotify/syncLock';
-
 const LOCK_TIMEOUT_MS = 15000; // 15 segundos
-
-
 
 const httpClient = axios.create({ timeout: SPOTIFY_API_TIMEOUT });
 
-
-
 const getFirebaseApp = () => {
-
-  if (!admin.apps.length) {
-
-    const raw = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!);
-
-    admin.initializeApp({
-
-      credential: admin.credential.cert(raw),
-
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
-
-    });
-
-  }
-
-  return admin.app();
-
+  if (!admin.apps.length) {
+    const raw = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON!);
+    admin.initializeApp({
+      credential: admin.credential.cert(raw),
+      databaseURL: process.env.FIREBASE_DATABASE_URL,
+    });
+  }
+  return admin.app();
 };
 
-
-
 async function refreshTokenIfNeeded(tokens: any): Promise<string> {
+  const now = Date.now();
+  if (tokens.expiresAt && tokens.expiresAt > now + 60_000) {
+    return tokens.accessToken;
+  }
 
-  const now = Date.now();
+  const refreshRes = await axios.post(
+    'https://accounts.spotify.com/api/token',
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refreshToken,
+      client_id: process.env.SPOTIFY_CLIENT_ID!,
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
 
-  if (tokens.expiresAt && tokens.expiresAt > now + 60_000) {
+  const newAccessToken = refreshRes.data.access_token;
+  const expiresIn = refreshRes.data.expires_in || 3600;
 
-    return tokens.accessToken;
+  const db = getFirebaseApp().database();
+  await db.ref('/admin/spotify/tokens').update({
+    accessToken: newAccessToken,
+    expiresAt: now + expiresIn * 1000,
+  });
 
-  }
-
-
-
-  const refreshRes = await axios.post(
-
-    'https://accounts.spotify.com/api/token',
-
-    new URLSearchParams({
-
-      grant_type: 'refresh_token',
-
-      refresh_token: tokens.refreshToken,
-
-      client_id: process.env.SPOTIFY_CLIENT_ID!,
-
-      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
-
-    }),
-
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-
-  );
-
-
-
-  const newAccessToken = refreshRes.data.access_token;
-
-  const expiresIn = refreshRes.data.expires_in || 3600;
-
-
-
-  const db = getFirebaseApp().database();
-
-  await db.ref('/admin/spotify/tokens').update({
-
-    accessToken: newAccessToken,
-
-    expiresAt: now + expiresIn * 1000,
-
-  });
-
-
-
-  return newAccessToken;
-
+  return newAccessToken;
 }
-
-
 
 async function getActiveDeviceId(accessToken: string): Promise<string> {
+  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player/devices`, {
-
-    headers: { Authorization: `Bearer ${accessToken}` },
-
-  });
-
-
-
-  const device = res.data.devices.find((d: any) => d.is_active) || res.data.devices[0];
-
-  if (!device?.id) throw new Error('No active Spotify devices found');
-
-  return device.id;
-
+  const device = res.data.devices.find((d: any) => d.is_active) || res.data.devices[0];
+  if (!device?.id) throw new Error('No active Spotify devices found');
+  return device.id;
 }
-
-
 
 async function getPlaybackState(accessToken: string): Promise<any | null> {
+  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-  const res = await httpClient.get(`${SPOTIFY_BASE_URL}/me/player`, {
+  if (res.status === 204) {
+    return null;
+  } else if (res.status !== 200) {
+    throw new Error(`Spotify API returned status ${res.status} for playback state`);
+  }
 
-    headers: { Authorization: `Bearer ${accessToken}` },
-
-  });
-
-
-
-  if (res.status === 204) {
-
-    return null;
-
-  } else if (res.status !== 200) {
-
-    throw new Error(`Spotify API returned status ${res.status} for playback state`);
-
-  }
-
-
-
-  return res.data;
-
+  return res.data;
 }
-
-
 
 async function enqueueTrack(accessToken: string, trackUri: string, deviceId?: string) {
+  const url = `${SPOTIFY_BASE_URL}/me/player/queue`;
+  const params = new URLSearchParams({ uri: trackUri });
+  if (deviceId) params.append('device_id', deviceId);
 
-  const url = `${SPOTIFY_BASE_URL}/me/player/queue`;
+  const headers = { Authorization: `Bearer ${accessToken}` };
 
-  const params = new URLSearchParams({ uri: trackUri });
-
-  if (deviceId) params.append('device_id', deviceId);
-
-
-
-  const headers = { Authorization: `Bearer ${accessToken}` };
-
-
-
-  await httpClient.post(`${url}?${params}`, {}, { headers });
-
+  await httpClient.post(`${url}?${params}`, {}, { headers });
 }
-
-
 
 async function getNextTrack(db: admin.database.Database): Promise<any | null> {
+  const operationId = crypto.randomUUID();
+  console.log(`[SYNC ${operationId}] Intentando obtener siguiente canción de la cola`);
+  const snap = await db.ref('/queue').once('value');
+  const queue = snap.val() || {};
 
-  console.log("DEBUG: Intentando obtener siguiente canción de la cola");
+  const songs = Object.entries(queue).map(([id, val]: any) => ({
+    id,
+    ...val,
+    order: val.order ?? val.timestampAdded ?? 0,
+    spotifyTrackId: val.spotifyTrackId ?? val.id,
+  }));
 
-  const snap = await db.ref('/queue').once('value');
-
-  const queue = snap.val() || {};
-
-
-
-  const songs = Object.entries(queue).map(([id, val]: any) => ({
-
-    id,
-
-    ...val,
-
-    order: val.order ?? val.timestampAdded ?? 0,
-
-    spotifyTrackId: val.spotifyTrackId ?? val.id,
-
-  }));
-
-
-
-  songs.sort((a, b) => a.order - b.order);
-
-  return songs[0] || null;
-
+  songs.sort((a, b) => a.order - b.order);
+  return songs[0] || null;
 }
-
-
 
 async function logError(message: string) {
-
-  const db = getFirebaseApp().database();
-
-  await db.ref('/admin/spotify/lastError').set({
-
-    message,
-
-    timestamp: Date.now(),
-
-  });
-
+  const operationId = crypto.randomUUID();
+  const db = getFirebaseApp().database();
+  await db.ref('/admin/spotify/lastError').set({
+    message,
+    timestamp: Date.now(),
+  });
+  console.log(`[SYNC ${operationId}] Error registrado: ${message}`);
 }
 
-
-
 export async function POST() {
-
-  const db = getFirebaseApp().database();
-
-  const lockRef = db.ref(SYNC_LOCK_PATH);
-
-  let lockAcquired = false;
-
-
-
-  try {
-
-    // 1. Intentar adquirir el lock
-
-    const transactionResult = await lockRef.transaction((currentData) => {
-
-      const now = Date.now();
-
-      if (currentData === null || !currentData.active || (now - currentData.timestamp > LOCK_TIMEOUT_MS)) {
-
-        return { active: true, timestamp: now, by: 'sync-route-v2' };
-
-      }
-
-      return; // Abortar transacción, lock ocupado
-
-    });
-
-
-
-    if (!transactionResult.committed || !transactionResult.snapshot?.val()?.active) {
-
-      console.log("DEBUG: Sincronización ya en progreso o lock falló. Saliendo.");
-
-      return NextResponse.json({ message: 'Sync already in progress or lock failed.' }, { status: 429 });
-
-    }
-
-    lockAcquired = true;
-
-    console.log("DEBUG: Lock de sincronización adquirido.");
-
-
-
-    // --- LÓGICA DE SINCRONIZACIÓN ---
-
-    const tokensSnap = await db.ref('/admin/spotify/tokens').once('value');
-
-    const tokens = tokensSnap.val();
-
-
-
-    if (!tokens?.refreshToken) {
-
-      await logError('No tokens found in database for sync');
-
-      return NextResponse.json({ error: 'No tokens found' }, { status: 400 });
-
-    }
-
-
-
-    const accessToken = await refreshTokenIfNeeded(tokens);
-
-    const deviceId = await getActiveDeviceId(accessToken);
-
-    console.log("DEBUG: Device ID:", deviceId);
-
-
-
-    const playbackState = await getPlaybackState(accessToken);
-
-    const nextQueueSong = await getNextTrack(db);
-
-
-
-    if (!nextQueueSong) {
-
-      console.log("DEBUG: No hay canciones en la cola Firebase.");
-
-      return NextResponse.json({ message: 'No tracks in Firebase queue' });
-
-    }
-
-
-
-    let shouldEnqueue = false;
-
-    if (playbackState && playbackState.item && playbackState.is_playing) {
-
-      const remainingTime = playbackState.item.duration_ms - playbackState.progress_ms;
-
-      if (remainingTime <= 10_000) {
-
-        console.log(`DEBUG: Quedan ${remainingTime/1000}s. Se debe encolar.`);
-
-        shouldEnqueue = true;
-
-      } else {
-
-        console.log(`DEBUG: Más de 10 segundos restantes (${remainingTime/1000}s). No se encola.`);
-
-      }
-
-    } else if (!playbackState || !playbackState.item || !playbackState.is_playing) {
-
-      console.log("DEBUG: No hay canción sonando activamente o playbackState incompleto. Se intentará encolar la siguiente de Firebase.");
-
-      shouldEnqueue = true;
-
-    }
-
-
-
-    if (!shouldEnqueue) {
-
-      return NextResponse.json({ message: 'Conditions to enqueue not met (e.g. song still has enough time or is paused).' });
-
-    }
-
-
-
-    // --- Lógica de encolar y eliminar la PRIMERA canción ---
-
-    const trackUri = `spotify:track:${nextQueueSong.spotifyTrackId}`;
-
-    const firebaseQueuePath = `/queue/${nextQueueSong.id}`;
-
-
-
-    await enqueueTrack(accessToken, trackUri, deviceId);
-
-    console.log(`DEBUG: Canción ${nextQueueSong.id} (${trackUri}) añadida a cola Spotify.`);
-
-
-
-    // Eliminar la canción de la cola de Firebase
-
-    await db.ref(firebaseQueuePath).remove();
-
-    console.log(`DEBUG: Canción ${nextQueueSong.id} eliminada de Firebase queue.`);
-
-
-
-    // Actualizar el ID de la canción que ahora está "sonando"
-
-    await db.ref('/admin/spotify/nowPlayingId').set({
-
-      id: nextQueueSong.spotifyTrackId,
-
-      title: nextQueueSong.title || "N/A",
-
-      artist: nextQueueSong.artist || "N/A",
-
-      source: 'jukebox-sync',
-
-      timestamp: Date.now(),
-
-    });
-
-    console.log(`DEBUG: nowPlayingId actualizado en Firebase a ${nextQueueSong.spotifyTrackId}.`);
-
-
-
-    return NextResponse.json({ success: true, enqueued: nextQueueSong });
-
-
-
-  } catch (err: any) {
-
-    await logError(err.response?.data?.error?.message || err.message || 'Unknown error in sync POST handler');
-
-    console.error("DEBUG: Error en la función POST de sincronización:", err);
-
-    return NextResponse.json({ error: 'Error: ' + (err.message || 'desconocido') }, { status: err.response?.status || 500 });
-
-  } finally {
-
-    // 2. Liberar el lock
-
-    if (lockAcquired) {
-
-      await lockRef.update({ active: false, releasedTimestamp: Date.now() });
-
-      console.log("DEBUG: Lock de sincronización liberado.");
-
-    }
-
-  }
-
+  const operationId = crypto.randomUUID();
+  console.log(`[SYNC ${operationId}] Iniciando sincronización...`);
+
+  const db = getFirebaseApp().database();
+  const lockRef = db.ref(SYNC_LOCK_PATH);
+  let lockAcquired = false;
+
+  try {
+    // 1. Intentar adquirir el lock
+    const transactionResult = await lockRef.transaction((currentData) => {
+      const now = Date.now();
+      if (!currentData || currentData.expiresAt < now) {
+        return { active: true, expiresAt: now + LOCK_TIMEOUT_MS, by: 'sync-route-v2' };
+      }
+      return; // Lock sigue activo
+    });
+
+    if (!transactionResult.committed || !transactionResult.snapshot?.val()?.active) {
+      console.log(`[SYNC ${operationId}] Sincronización ya en progreso o lock falló. Saliendo.`);
+      return NextResponse.json({ message: 'Sync already in progress or lock failed.' }, { status: 429 });
+    }
+
+    lockAcquired = true;
+    console.log(`[SYNC ${operationId}] Lock de sincronización adquirido.`);
+
+    // --- LÓGICA DE SINCRONIZACIÓN ---
+    const tokensSnap = await db.ref('/admin/spotify/tokens').once('value');
+    const tokens = tokensSnap.val();
+
+    if (!tokens?.refreshToken) {
+      await logError('No tokens found in database for sync');
+      return NextResponse.json({ error: 'No tokens found' }, { status: 400 });
+    }
+
+    const accessToken = await refreshTokenIfNeeded(tokens);
+    const deviceId = await getActiveDeviceId(accessToken);
+    console.log(`[SYNC ${operationId}] Device ID: ${deviceId}`);
+
+    const playbackState = await getPlaybackState(accessToken);
+    const nextQueueSong = await getNextTrack(db);
+
+    if (!nextQueueSong) {
+      console.log(`[SYNC ${operationId}] No hay canciones en la cola Firebase.`);
+      return NextResponse.json({ message: 'No tracks in Firebase queue' });
+    }
+
+    let shouldEnqueue = false;
+    if (playbackState && playbackState.item && playbackState.is_playing) {
+      const remainingTime = playbackState.item.duration_ms - playbackState.progress_ms;
+      if (remainingTime <= 10_000) {
+        console.log(`[SYNC ${operationId}] Quedan ${remainingTime/1000}s. Se debe encolar.`);
+        shouldEnqueue = true;
+      } else {
+        console.log(`[SYNC ${operationId}] Más de 10 segundos restantes (${remainingTime/1000}s). No se encola.`);
+      }
+    } else if (!playbackState || !playbackState.item || !playbackState.is_playing) {
+      console.log(`[SYNC ${operationId}] No hay canción sonando activamente o playbackState incompleto. Se intentará encolar la siguiente de Firebase.`);
+      shouldEnqueue = true;
+    }
+
+    if (!shouldEnqueue) {
+      return NextResponse.json({ message: 'Conditions to enqueue not met (e.g. song still has enough time or is paused).' });
+    }
+
+    // --- Lógica de encolar y eliminar la PRIMERA canción ---
+    const trackUri = `spotify:track:${nextQueueSong.spotifyTrackId}`;
+    const firebaseQueuePath = `/queue/${nextQueueSong.id}`;
+
+    await enqueueTrack(accessToken, trackUri, deviceId);
+    console.log(`[SYNC ${operationId}] Canción ${nextQueueSong.id} (${trackUri}) añadida a cola Spotify.`);
+
+    // Eliminar la canción de la cola de Firebase
+    await db.ref(firebaseQueuePath).remove();
+    console.log(`[SYNC ${operationId}] Canción ${nextQueueSong.id} eliminada de Firebase queue.`);
+
+    // Actualizar el ID de la canción que ahora está "sonando"
+    await db.ref('/admin/spotify/nowPlayingId').set({
+      id: nextQueueSong.spotifyTrackId,
+      title: nextQueueSong.title || "N/A",
+      artist: nextQueueSong.artist || "N/A",
+      source: 'jukebox-sync',
+      timestamp: Date.now(),
+    });
+    console.log(`[SYNC ${operationId}] nowPlayingId actualizado en Firebase a ${nextQueueSong.spotifyTrackId}.`);
+
+    return NextResponse.json({ success: true, enqueued: nextQueueSong });
+
+  } catch (err: any) {
+    await logError(err.response?.data?.error?.message || err.message || 'Unknown error in sync POST handler');
+    console.error(`[SYNC ${operationId}] Error en la función POST de sincronización:`, err);
+    return NextResponse.json({ error: 'Error: ' + (err.message || 'desconocido') }, { status: err.response?.status || 500 });
+
+  } finally {
+    // 2. Liberar el lock
+    if (lockAcquired) {
+      await lockRef.update({ active: false, releasedTimestamp: Date.now() });
+      console.log(`[SYNC ${operationId}] Lock liberado.`);
+    }
+  }
 }

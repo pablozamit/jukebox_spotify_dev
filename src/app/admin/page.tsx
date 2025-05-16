@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
@@ -70,6 +70,7 @@ const fetcher = async (url: string) => {
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const isSyncingRef = useRef(false);
 
   const [user, setUser] = useState<User | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -91,31 +92,35 @@ export default function AdminPage() {
   // Sync Interval
   useEffect(() => {
     const interval = setInterval(async () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+
       try {
         console.log('[Jukebox Admin] Intentando llamar a /api/spotify/sync...');
         const syncRes = await fetch('/api/spotify/sync', { method: 'POST' });
         const syncJson = await syncRes.json();
 
-        if (syncRes.status === 429) { // Código para "Too Many Requests" (lock activo)
-          console.log('[Jukebox Admin] /api/spotify/sync indica que ya hay una sincronización en progreso. Se reintentará en el próximo intervalo.');
-          return; // No es un error, simplemente el backend está ocupado.
+        if (syncRes.status === 429) {
+          console.log('[Jukebox Admin] Ya hay una sincronización activa. Esperando al siguiente intento.');
+          return;
         }
 
         if (!syncRes.ok) {
-          console.error('[Jukebox Admin] Error en llamada periódica a /api/spotify/sync:', syncJson.error || syncJson.message);
-          toast({ title: 'Error de sincronización', description: syncJson.error || syncJson.message || 'No se pudo sincronizar con Spotify.', variant: 'destructive' });
+          console.error('[Jukebox Admin] Error:', syncJson.error || syncJson.message);
+          toast({ title: 'Error de sincronización', description: syncJson.error || syncJson.message, variant: 'destructive' });
         } else {
-          console.log('[Jukebox Admin] /api/spotify/sync respuesta:', syncJson);
-          if (syncJson.success && syncJson.enqueued) {
-            // Solo refrescar si realmente se encoló algo
-            mutateCurrentPlaying(); 
-          }
+          console.log('[Jukebox Admin] Respuesta:', syncJson);
+          if (syncJson.success && syncJson.enqueued) mutateCurrentPlaying();
         }
       } catch (error) {
-        console.error('[Jukebox Admin] Error en fetch periódico a /api/spotify/sync:', error);
-        toast({ title: 'Error de red', description: 'No se pudo conectar con el servidor de sincronización.', variant: 'destructive' });
+        console.error('[Jukebox Admin] Error en fetch:', error);
+        toast({ title: 'Error de red', description: 'No se pudo conectar al servidor de sincronización.', variant: 'destructive' });
+      } finally {
+        setTimeout(() => {
+          isSyncingRef.current = false;
+        }, 3000); // Espera 3s antes de permitir otro intento
       }
-    }, 5000); // Intervalo de 5 segundos
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [toast, mutateCurrentPlaying]);
@@ -763,7 +768,7 @@ export default function AdminPage() {
                       </div>
                     ))
                   ) : searchTerm ? (
-                    <p className="text-center text-sm text-muted-foreground py-4                                              italic">No se encontraron resultados para "{searchTerm}".</p>
+                    <p className="text-center text-sm text-muted-foreground py-4 italic">No se encontraron resultados para "{searchTerm}".</p>
                   ) : (
                     <p className="text-center text-sm text-muted-foreground py-4 italic">
                       {config.searchMode === 'playlist' && !config.playlistId ? 'Configure una playlist para buscar o ver todas las canciones.' : 'Busca una canción o artista.'}
