@@ -124,17 +124,16 @@ export async function POST() {
 
   try {
     // 1. Intentar adquirir el lock
-    const transactionResult = await lockRef.transaction((currentData) => {
+    const transactionResult = await lockRef.transaction(currentData => {
       const now = Date.now();
       console.log(`[SYNC ${operationId}] currentData del lock:`, currentData);
     
-      if (!currentData || !currentData.expiresAt || currentData.expiresAt < now) {
+      // adquirimos si no existe, si active está en false (liberado), o si ha caducado
+      if (!currentData || currentData.active === false || currentData.expiresAt < now) {
         return { active: true, expiresAt: now + LOCK_TIMEOUT_MS, by: 'sync-route-v2' };
       }
-    
-      return; // Lock sigue activo
+      return; // lock sigue activo
     });
-    
 
     if (!transactionResult.committed || !transactionResult.snapshot?.val()?.active) {
       console.log(`[SYNC ${operationId}] Sincronización ya en progreso o lock falló. Saliendo.`);
