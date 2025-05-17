@@ -105,9 +105,7 @@ export const handleTrackEndNotification = functions.https.onRequest(async (req, 
       const db = admin.database();
 
       if (nextSong) {
-        console.log(`handleTrackEndNotification: Next song found: ${nextSong.title}. Sending play command.`);
-        await db.ref('playback/command').set({ action: 'play', uri: `spotify:track:${nextSong.spotifyTrackId}`, timestamp: Date.now() });
-        console.log("handleTrackEndNotification: Play command sent to Firebase.");
+        console.log(`handleTrackEndNotification: Next song found: ${nextSong.title}.`);
       } else {
         console.log('handleTrackEndNotification: Queue is empty. Sending pause command.');
         await db.ref('playback/command').set({ action: 'pause', timestamp: Date.now() });

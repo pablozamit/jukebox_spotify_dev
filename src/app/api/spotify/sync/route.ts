@@ -160,6 +160,21 @@ export async function POST() {
     const playbackState = await getPlaybackState(accessToken);
     const nextQueueSong = await getNextTrack(db);
 
+    // ——— Gestión de estado para evitar encolados dobles ———
+    const syncStateRef = db.ref('/admin/spotify/syncState');
+    const syncStateSnap = await syncStateRef.once('value');
+    const syncState = syncStateSnap.val() || { lastTrackId: null, hasQueuedNext: false };
+    let { lastTrackId, hasQueuedNext } = syncState;
+
+    // ID de la pista actual de Spotify
+    const currentTrackId = playbackState?.item?.id || null;
+
+    // Si cambió de canción, reseteamos el flag
+    if (currentTrackId !== lastTrackId) {
+      lastTrackId = currentTrackId;
+      hasQueuedNext = false;
+    }
+
     if (!nextQueueSong) {
       console.log(`[SYNC ${operationId}] No hay canciones en la cola Firebase.`);
       return NextResponse.json({ message: 'No tracks in Firebase queue' });
@@ -180,11 +195,11 @@ export async function POST() {
         console.log(`[SYNC ${operationId}] No se encola. Estado: ${playbackState.is_playing ? 'sonando' : 'pausado'}, quedan ${remainingTime / 1000}s`);
       }
     }
-    
 
-
-    if (!shouldEnqueue) {
-      return NextResponse.json({ message: 'Conditions to enqueue not met (e.g. song still has enough time or is paused).' });
+    // Si no toca encolar, o ya lo hicimos para esta pista, salimos
+    if (!shouldEnqueue || hasQueuedNext) {
+      await syncStateRef.update({ lastTrackId, hasQueuedNext });
+      return NextResponse.json({ message: 'Nothing to enqueue', enqueued: false });
     }
 
     // --- Lógica de encolar y eliminar la PRIMERA canción ---
@@ -197,6 +212,10 @@ export async function POST() {
     // Eliminar la canción de la cola de Firebase
     await db.ref(firebaseQueuePath).remove();
     console.log(`[SYNC ${operationId}] Canción ${nextQueueSong.id} eliminada de Firebase queue.`);
+
+    // Marcamos que ya encolamos para esta pista
+    hasQueuedNext = true;
+    await syncStateRef.update({ lastTrackId, hasQueuedNext });
 
     // Actualizar el ID de la canción que ahora está "sonando"
     await db.ref('/admin/spotify/nowPlayingId').set({
