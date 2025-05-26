@@ -1,52 +1,26 @@
 // src/lib/firebaseAdmin.ts
-console.log('Executing firebaseAdmin.ts');
+console.warn(
+  "Firebase Admin SDK (src/lib/firebaseAdmin.ts) has been effectively disabled as part of the Electron migration."
+);
+console.warn(
+  "If any Next.js API routes still attempt to use 'adminDb', they will receive 'null' and likely fail."
+);
+console.warn(
+  "These API routes should be refactored or deprecated."
+);
 
-import * as admin from 'firebase-admin';
+// Export null to minimize runtime errors in files that still import adminDb.
+// Those files should eventually be updated to not rely on this.
+export const adminDb = null;
 
-console.log('Firebase Admin Init: Starting initialization...');
-console.log('GOOGLE_APPLICATION_CREDENTIALS_JSON loaded:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-console.log('FIREBASE_DATABASE_URL:', process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL);
-
-if (!admin.apps.length) {
-  try {
-    const databaseURL = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
-    const json = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-
-    if (!databaseURL || !json) {
-      throw new Error("Missing DATABASE_URL or GOOGLE_APPLICATION_CREDENTIALS_JSON.");
-    }
-
-    console.log('Raw GOOGLE_APPLICATION_CREDENTIALS_JSON:', json);
-    const raw = JSON.parse(json);
-raw.private_key = raw.private_key.replace(/\\n/g, '\n');
-
-admin.initializeApp({
-  credential: admin.credential.cert(raw),
-  databaseURL,
-});
-
-
-console.log('Parsed service account:', raw);
-
-    console.log('✅ Firebase Admin SDK initialized successfully (from src/lib/firebaseAdmin.ts)');
-  } catch (error: any) {
-    console.error("🔥 Firebase Admin SDK Initialization Error:", error.message, error.stack);
-  }
-} else {
-  console.log('Firebase Admin SDK already initialized.');
-}
-
-let adminDbInstance: admin.database.Database | null = null;
-
-try {
-  if (admin.apps.length > 0) {
-    adminDbInstance = admin.database();
-    console.log('✅ Firebase Admin Realtime Database instance ready.');
-  } else {
-    console.warn('⚠️ Firebase Admin SDK not initialized, cannot get DB instance.');
-  }
-} catch (error) {
-  console.error("🔥 Failed to get Firebase Admin Database instance:", error);
-}
-
-export const adminDb = adminDbInstance;
+// Optionally, to make it even clearer if something tries to use admin:
+// export const admin = {
+//   initializeApp: () => console.warn("Firebase Admin app.initializeApp called on disabled module"),
+//   credential: { cert: () => console.warn("Firebase Admin app.credential.cert called on disabled module")},
+//   apps: [],
+//   database: () => {
+//     console.warn("Firebase Admin admin.database() called on disabled module");
+//     return null;
+//   }
+// };
+// However, just exporting adminDb = null is simpler and achieves the immediate goal.

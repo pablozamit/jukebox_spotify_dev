@@ -2,8 +2,10 @@
   "name": "nextn",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev -p 9002 --hostname 0.0.0.0",
+    "start:electron": "electron .",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",
     "build": "next build",
@@ -11,7 +13,39 @@
     "lint": "next lint || true",
     "typecheck": "tsc --noEmit",
     "functions:build": "tsc --build functions",
-    "functions:deploy": "npm run functions:build && firebase deploy --only functions"
+    "functions:deploy": "npm run functions:build && firebase deploy --only functions",
+    "build:next": "next build && next export",
+    "build:electron": "electron-builder",
+    "dist": "npm run build:next && npm run build:electron"
+  },
+  "build": {
+    "appId": "com.example.barjukebox",
+    "productName": "Bar Jukebox",
+    "files": [
+      "electron/main.js",
+      "out/**/*",
+      "node_modules/",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist_electron"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "nsis": {
+        "oneClick": false,
+        "allowToChangeInstallationDirectory": true,
+        "runAfterFinish": true,
+        "createDesktopShortcut": true,
+        "installerIcon": "build/installerIcon.ico",
+        "shortcutName": "Bar Jukebox",
+        "artifactName": "${productName}-Setup-${version}.${ext}",
+        "perMachine": false,
+        "include": "build/installer.nsh"
+      }
+    }
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.0.4",
@@ -44,6 +78,8 @@
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "dotenv": "^16.5.0",
+    "electron-log": "^5.4.0",
+    "electron-store": "^10.0.1",
     "firebase": "^11.6.1",
     "firebase-admin": "^13.3.0",
     "geist": "^1.3.0",
@@ -67,6 +103,8 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/spotify-web-api-node": "^5.0.11",
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12",
     "genkit-cli": "^1.0.4",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
