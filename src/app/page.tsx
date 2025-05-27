@@ -29,15 +29,6 @@ import {
 } from 'lucide-react';
 import { searchSpotify } from '@/services/spotify';
 // Firebase specific imports removed
-// import {
-//   ref,
-//   onValue,
-//   push,
-//   set,
-//   remove,
-//   serverTimestamp,
-// } from 'firebase/database';
-// import { db, isDbValid } from '@/lib/firebase';
 import {
   // IPC Methods from the new wrapper
   getSongQueue,

@@ -216,3 +216,35 @@ export async function openPathInShell(filePath: string): Promise<{ success: bool
   if (!ipcRenderer) return { success: false, error: 'ipcRenderer not available' };
   return ipcRenderer.invoke('open-path-in-shell', filePath);
 }
+
+// --- Spotify Playback Info (New IPC handlers) ---
+export interface CurrentlyPlayingTrack {
+  isPlaying: boolean;
+  spotifyTrackId?: string;
+  title?: string;
+  artist?: string;
+  albumArtUrl?: string | null;
+  progress_ms?: number;
+  duration_ms?: number;
+  uri?: string;
+}
+
+export async function getCurrentPlaying(): Promise<{ success: boolean; data?: CurrentlyPlayingTrack; error?: string; errorType?: string; message?: string }> {
+  const ipcRenderer = getIpcRenderer();
+  if (!ipcRenderer) return { success: false, error: 'ipcRenderer not available' };
+  return ipcRenderer.invoke('get-current-playing');
+}
+
+export interface PlaylistDetails {
+  id: string;
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  externalUrl: string | null;
+}
+
+export async function getPlaylistDetails(playlistId: string): Promise<{ success: boolean; data?: PlaylistDetails; error?: string; errorType?: string; message?: string }> {
+  const ipcRenderer = getIpcRenderer();
+  if (!ipcRenderer) return { success: false, error: 'ipcRenderer not available' };
+  return ipcRenderer.invoke('get-playlist-details', { playlistId });
+}

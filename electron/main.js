@@ -291,6 +291,179 @@ ipcMain.handle('spotify-login', async () => {
   }
 });
 
+// IPC Handler for Getting Currently Playing Song
+ipcMain.handle('get-current-playing', async () => {
+  log.info('IPC: get-current-playing called');
+
+  let accessToken = store.get('spotifyAccessToken');
+  const expiresAt = store.get('spotifyExpiresAt');
+  const refreshTokenFromStore = store.get('spotifyRefreshToken');
+
+  if (!refreshTokenFromStore) {
+    log.error('GetCurrentPlaying: No Spotify refresh token found. User needs to login.');
+    return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify not connected. Please login.', data: null };
+  }
+
+  if (!accessToken || !expiresAt || Date.now() >= (expiresAt - 60000)) {
+    log.info('GetCurrentPlaying: Access token expired or missing, attempting refresh...');
+    const refreshResult = await refreshSpotifyToken();
+    if (refreshResult.success) {
+      accessToken = refreshResult.accessToken;
+    } else {
+      log.error('GetCurrentPlaying: Failed to refresh Spotify token:', refreshResult.message, refreshResult.details);
+      if (mainWindow) {
+        mainWindow.webContents.send('spotify-reauth-required');
+      }
+      return { success: false, errorType: refreshResult.errorType || 'SPOTIFY_AUTH_ERROR', message: refreshResult.message || 'Failed to refresh Spotify token.', data: null };
+    }
+  }
+
+  if (!accessToken) {
+    log.error('GetCurrentPlaying: No valid access token after check/refresh.');
+    return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify not connected or token invalid.', data: null };
+  }
+
+  try {
+    const response = await axios.get('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      params: { market: 'from_token' } // or a specific market
+    });
+
+    if (response.status === 200 && response.data && response.data.item) {
+      const track = response.data.item;
+      const isPlaying = response.data.is_playing;
+      const currentTrackData = {
+        isPlaying: isPlaying,
+        spotifyTrackId: track.id,
+        title: track.name,
+        artist: track.artists.map(a => a.name).join(', '),
+        albumArtUrl: track.album && track.album.images && track.album.images.length > 0 ? track.album.images[0].url : null,
+        progress_ms: response.data.progress_ms,
+        duration_ms: track.duration_ms,
+        uri: track.uri,
+      };
+      log.info(`GetCurrentPlaying: Currently playing "${currentTrackData.title}". IsPlaying: ${isPlaying}`);
+      return { success: true, data: currentTrackData };
+    } else if (response.status === 204 || !response.data || !response.data.item) {
+      log.info('GetCurrentPlaying: No content currently playing or player not active.');
+      return { success: true, data: { isPlaying: false } }; // Explicitly state nothing is playing
+    } else {
+      // Should not happen if status is 200 but item is missing, but as a fallback
+      log.warn('GetCurrentPlaying: Response received, but no track item found or unexpected status.');
+      return { success: false, errorType: 'NO_DATA', message: 'No track data found in response.', data: null };
+    }
+  } catch (error) {
+    log.error('Error fetching currently playing song:', error.response ? error.response.data : error.message, error.stack);
+    // Similar error handling as search-spotify-locally
+    const isNetworkError = error.isAxiosError && !error.response;
+    const isTimeoutError = error.code === 'ECONNABORTED';
+    const specificNetworkErrorCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH'];
+    const isSpecificNetworkError = specificNetworkErrorCodes.includes(error.code);
+
+    if (isNetworkError || isTimeoutError || isSpecificNetworkError) {
+      log.error('GetCurrentPlaying: Network/Timeout error detected.');
+      if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'fetching current song', message: 'Could not connect to Spotify.' });
+      return { success: false, errorType: 'SPOTIFY_API_UNAVAILABLE', message: 'Network error. Could not connect to Spotify.', data: null };
+    }
+    if (error.response) {
+      if (error.response.status === 401) {
+        if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
+        return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify token invalid. Please re-login.', data: null };
+      }
+      if (error.response.status >= 500) {
+        log.error(`GetCurrentPlaying: Spotify API server error: ${error.response.status}`);
+        if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'fetching current song (server error)', message: 'Spotify is temporarily unavailable.'});
+        return { success: false, errorType: 'SPOTIFY_API_SERVER_ERROR', message: `Spotify API server error: ${error.response.status}`, data: null };
+      }
+    }
+    return { success: false, errorType: 'UNKNOWN_ERROR', message: error.message || 'Failed to fetch currently playing song.', data: null };
+  }
+});
+
+// IPC Handler for Getting Playlist Details
+ipcMain.handle('get-playlist-details', async (event, { playlistId }) => {
+  log.info(`IPC: get-playlist-details called for playlist ID: ${playlistId}`);
+
+  if (!playlistId) {
+    return { success: false, errorType: 'MISSING_PARAMETER', message: 'Playlist ID is required.', data: null };
+  }
+
+  let accessToken = store.get('spotifyAccessToken');
+  const expiresAt = store.get('spotifyExpiresAt');
+  const refreshTokenFromStore = store.get('spotifyRefreshToken');
+
+  if (!refreshTokenFromStore) {
+    log.error('GetPlaylistDetails: No Spotify refresh token found.');
+    return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify not connected. Please login.', data: null };
+  }
+
+  if (!accessToken || !expiresAt || Date.now() >= (expiresAt - 60000)) {
+    log.info('GetPlaylistDetails: Access token expired or missing, attempting refresh...');
+    const refreshResult = await refreshSpotifyToken();
+    if (refreshResult.success) {
+      accessToken = refreshResult.accessToken;
+    } else {
+      log.error('GetPlaylistDetails: Failed to refresh Spotify token:', refreshResult.message);
+      if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
+      return { success: false, errorType: refreshResult.errorType || 'SPOTIFY_AUTH_ERROR', message: refreshResult.message || 'Failed to refresh token.', data: null };
+    }
+  }
+
+  if (!accessToken) {
+    log.error('GetPlaylistDetails: No valid access token after check/refresh.');
+    return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify token invalid.', data: null };
+  }
+
+  try {
+    const response = await axios.get(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      params: { fields: 'id,name,description,images,external_urls' } // Request specific fields
+    });
+
+    if (response.status === 200 && response.data) {
+      const playlistData = {
+        id: response.data.id,
+        name: response.data.name,
+        description: response.data.description,
+        imageUrl: response.data.images && response.data.images.length > 0 ? response.data.images[0].url : null,
+        externalUrl: response.data.external_urls ? response.data.external_urls.spotify : null,
+      };
+      log.info(`GetPlaylistDetails: Successfully fetched details for playlist "${playlistData.name}".`);
+      return { success: true, data: playlistData };
+    } else {
+      log.warn('GetPlaylistDetails: Playlist not found or unexpected response status.');
+      return { success: false, errorType: 'NO_DATA', message: 'Playlist not found or no data.', data: null };
+    }
+  } catch (error) {
+    log.error('Error fetching playlist details:', error.response ? error.response.data : error.message, error.stack);
+    const isNetworkError = error.isAxiosError && !error.response;
+    const isTimeoutError = error.code === 'ECONNABORTED';
+    const specificNetworkErrorCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH'];
+    const isSpecificNetworkError = specificNetworkErrorCodes.includes(error.code);
+
+    if (isNetworkError || isTimeoutError || isSpecificNetworkError) {
+      log.error('GetPlaylistDetails: Network/Timeout error.');
+      if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'fetching playlist details', message: 'Could not connect to Spotify.' });
+      return { success: false, errorType: 'SPOTIFY_API_UNAVAILABLE', message: 'Network error.', data: null };
+    }
+    if (error.response) {
+      if (error.response.status === 401) {
+        if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
+        return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify token invalid.', data: null };
+      }
+      if (error.response.status === 404) {
+        return { success: false, errorType: 'NOT_FOUND', message: 'Playlist not found.', data: null };
+      }
+      if (error.response.status >= 500) {
+        log.error(`GetPlaylistDetails: Spotify API server error: ${error.response.status}`);
+        if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'fetching playlist (server error)', message: 'Spotify is temporarily unavailable.'});
+        return { success: false, errorType: 'SPOTIFY_API_SERVER_ERROR', message: `Spotify API server error: ${error.response.status}`, data: null };
+      }
+    }
+    return { success: false, errorType: 'UNKNOWN_ERROR', message: error.message || 'Failed to fetch playlist details.', data: null };
+  }
+});
+
 ipcMain.handle('get-spotify-devices', async () => {
   console.log('IPC: get-spotify-devices called');
   

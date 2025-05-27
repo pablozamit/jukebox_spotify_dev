@@ -3,14 +3,15 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 // Firebase Auth and DB imports removed
-// import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-// import { ref, onValue, remove, update, push, set, serverTimestamp, get } from 'firebase/database';
-// import { auth, db, isDbValid } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import useSWR from 'swr';
+// import useSWR from 'swr'; // No longer used
 import {
   // IPC Methods from the new wrapper
   loginToSpotify,
+  getCurrentPlaying, // Added
+  getPlaylistDetails as ipcGetPlaylistDetails, // Added and aliased
+  searchSpotifyLocally, // Added
+  CurrentlyPlayingTrack, // Added
   getValidSpotifyAccessToken,
   onSpotifyAuthSuccess,
   onSpotifyReauthRequired,
@@ -28,10 +29,14 @@ import {
   spotifyLogout, // Import new logout function
   onSpotifyDisconnected, // Import new listener
   getSpotifyDevices, // Import new function
-  SpotifyDevice // Import type
+  SpotifyDevice, // Import type
+  setSpotifyCredentials, // Added for new UI section
 } from '@/lib/electron-ipc';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+// PlaylistDetails is now also imported from electron-ipc, ensure no conflict or use alias if local one is different
+// For now, assuming the IPC one will replace the local one if structures match.
+// import { PlaylistDetails } from '@/lib/electron-ipc'; // Already defined locally, check structure
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -76,35 +81,34 @@ interface Song {
 type SpotifyConfig = ElectronSettings;
 
 
-interface PlaylistDetails {
-  name: string;
-  description: string;
-  imageUrl: string | null;
-  externalUrl?: string;
-}
+// Local PlaylistDetails might conflict if structure is different from IPC one.
+// For now, assuming IPC one is desired. If not, one needs to be aliased.
+// interface PlaylistDetails {
+//   name: string;
+//   description: string;
+//   imageUrl: string | null;
+//   externalUrl?: string;
+// }
+// Using PlaylistDetails from electron-ipc
 
-interface SpotifyStatus {
-  spotifyConnected: boolean;
-  tokensOk: boolean;
-  playbackAvailable: boolean;
-  activeDevice?: { id: string; name: string; type: string };
-  message?: string;
-}
+// interface SpotifyStatus { // This interface seems unused, can be removed
+//   spotifyConnected: boolean;
+//   tokensOk: boolean;
+//   playbackAvailable: boolean;
+//   activeDevice?: { id: string; name: string; type: string };
+//   message?: string;
+// }
 
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Error al cargar datos.');
-  return res.json();
-};
+// const fetcher = async (url: string) => { // fetcher is no longer needed
+//   const res = await fetch(url);
+//   if (!res.ok) throw new Error('Error al cargar datos.');
+//   return res.json();
+// };
 
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const isSyncingRef = useRef(false); // Keep for now, related to /api/spotify/sync
-
-  // User state and loadingAuth removed
-  // const [user, setUser] = useState<User | null>(null);
-  // const [loadingAuth, setLoadingAuth] = useState(true);
+  // const isSyncingRef = useRef(false); // This was for the removed syncInterval
 
   const [queue, setQueue] = useState<QueueSong[]>([]);
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
@@ -112,47 +116,48 @@ export default function AdminPage() {
   const [playlistIdInput, setPlaylistIdInput] = useState('');
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
   
-  // spotifyStatus will be simplified, based on token availability
   const [spotifyConnected, setSpotifyConnected] = useState(false); 
-  // const [spotifyAccessToken, setSpotifyAccessToken] = useState<string | null>(null); // Not needed directly, getSpotifyAccessToken handles it
-  const [playlistDetails, setPlaylistDetails] = useState<PlaylistDetails | null>(null);
+  const [playlistDetails, setPlaylistDetails] = useState<import('@/lib/electron-ipc').PlaylistDetails | null>(null); // Use IPC type
   const [isLoadingPlaylist, setIsLoadingPlaylist] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<Song[]>([]);
+  const [searchResults, setSearchResults] = useState<Song[]>([]); // Song type is local, ensure it matches searchSpotifyLocally results
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
   const [availableDevices, setAvailableDevices] = useState<SpotifyDevice[]>([]);
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
 
-  const { data: currentPlaying, mutate: mutateCurrentPlaying } = useSWR('/api/spotify/current', fetcher, { refreshInterval: 5000 });
+  const [currentPlaying, setCurrentPlaying] = useState<CurrentlyPlayingTrack | null>(null);
+  const [isLoadingCurrentPlaying, setIsLoadingCurrentPlaying] = useState(true);
 
-  // Sync Interval - Keep for now, will be refactored or removed in Step 4
-  // useEffect(() => {
-  //   const interval = setInterval(async () => {
-  //     if (isSyncingRef.current) return;
-  //     isSyncingRef.current = true;
-  //     try {
-  //       console.log('[Jukebox Admin] Intentando llamar a /api/spotify/sync...');
-  //       const syncRes = await fetch('/api/spotify/sync', { method: 'POST' });
-  //       const syncJson = await syncRes.json();
-  //       if (syncRes.status === 429) {
-  //         console.log('[Jukebox Admin] Ya hay una sincronización activa.');
-  //         return;
-  //       }
-  //       if (!syncRes.ok) {
-  //         console.error('[Jukebox Admin] Error:', syncJson.error || syncJson.message);
-  //         toast({ title: 'Error de sincronización', description: syncJson.error || syncJson.message, variant: 'destructive' });
-  //       } else {
-  //         if (syncJson.success && syncJson.enqueued) mutateCurrentPlaying();
-  //       }
-  //     } catch (error) {
-  //       console.error('[Jukebox Admin] Error en fetch:', error);
-  //       toast({ title: 'Error de red', description: 'No se pudo conectar.', variant: 'destructive' });
-  //     } finally {
-  //       setTimeout(() => { isSyncingRef.current = false; }, 3000);
-  //     }
-  //   }, 5000);
-  //   return () => clearInterval(interval);
-  // }, [toast, mutateCurrentPlaying]);
+  // State for Spotify credential inputs
+  const [spotifyClientIdInput, setSpotifyClientIdInput] = useState('');
+  const [spotifyClientSecretInput, setSpotifyClientSecretInput] = useState('');
+  const [isSavingCredentials, setIsSavingCredentials] = useState(false);
+
+
+  // Fetch Currently Playing Song via IPC
+  useEffect(() => {
+    if (!isElectron()) return;
+
+    const fetchCurrentPlaying = async () => {
+      // setIsLoadingCurrentPlaying(true); // Set loading true at the start of fetch
+      const result = await getCurrentPlaying();
+      if (result.success && result.data) {
+        setCurrentPlaying(result.data);
+      } else {
+        setCurrentPlaying(null); // Set to null or a default "not playing" state
+        if (result.errorType !== 'SPOTIFY_API_UNAVAILABLE') { // Don't toast for frequent unavailability errors
+          // toast({ title: 'Error Pista Actual', description: result.message || result.error || 'No se pudo obtener la canción actual.', variant: 'destructive' });
+        }
+        console.error("Error fetching current playing:", result.message || result.error);
+      }
+      setIsLoadingCurrentPlaying(false);
+    };
+
+    fetchCurrentPlaying(); // Initial fetch
+    const intervalId = setInterval(fetchCurrentPlaying, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(intervalId); // Cleanup interval on unmount
+  }, [toast]);
 
   // Auth is handled by Electron now, no Firebase auth check needed.
   // Assuming admin page is accessible if app is running in Electron.
@@ -179,7 +184,7 @@ export default function AdminPage() {
 
     const unsubscribe = onSongQueueUpdated((updatedQueue) => {
       setQueue(updatedQueue.map(s => ({...s, id: s.spotifyTrackId})));
-      toast({ title: 'Cola actualizada', description: 'La cola de reproducción ha cambiado.' });
+      // toast({ title: 'Cola actualizada', description: 'La cola de reproducción ha cambiado.' }); // Can be too noisy
     });
     return () => unsubscribe();
   }, [toast]);
@@ -201,14 +206,14 @@ export default function AdminPage() {
     const unsubscribe = onApplicationSettingsUpdated((updatedSettings) => {
       setConfig(updatedSettings);
       setPlaylistIdInput(updatedSettings.playlistId || '');
-      toast({ title: 'Configuración actualizada', description: 'Los ajustes han cambiado.' });
+      // toast({ title: 'Configuración actualizada', description: 'Los ajustes han cambiado.' }); // Can be too noisy
     });
     return () => unsubscribe();
   }, [toast]);
 
-  // Playlist Details Fetch
+  // Playlist Details Fetch via IPC
   useEffect(() => {
-    if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
+    if (!isElectron() || !config || config.searchMode !== 'playlist' || !config.playlistId) {
       setPlaylistDetails(null);
       setIsLoadingPlaylist(false);
       return;
@@ -216,28 +221,19 @@ export default function AdminPage() {
 
     const fetchDetails = async () => {
       setIsLoadingPlaylist(true);
-      try {
-        const res = await fetch(`/api/spotify/playlist-details?playlistId=${config.playlistId}`);
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || `Error ${res.status}`);
-        }
-        const data: PlaylistDetails = await res.json();
-        setPlaylistDetails(data);
-      } catch (error: any) {
-        console.error('Error fetching playlist details:', error);
+      const result = await ipcGetPlaylistDetails(config.playlistId as string); // Ensure playlistId is not null
+      if (result.success && result.data) {
+        setPlaylistDetails(result.data);
+      } else {
         setPlaylistDetails(null);
         toast({
           title: 'Error al Cargar Playlist',
-          description:
-            error.message === 'Playlist no encontrada'
-              ? 'La playlist configurada no existe o no es accesible.'
-              : 'No se pudo cargar la información de la playlist.',
+          description: result.message || result.error || 'No se pudo cargar la información de la playlist.',
           variant: 'destructive',
         });
-      } finally {
-        setIsLoadingPlaylist(false);
+        console.error('Error fetching playlist details via IPC:', result.message || result.error);
       }
+      setIsLoadingPlaylist(false);
     };
     fetchDetails();
   }, [config, toast]);
@@ -260,11 +256,10 @@ export default function AdminPage() {
         getSpotifyDevices().then(deviceResult => {
           if (deviceResult.success && deviceResult.devices) {
             setAvailableDevices(deviceResult.devices);
-            // Auto-select active device if no device is currently set
             if (!config.spotifyDeviceId && deviceResult.devices.some(d => d.is_active)) {
               const activeDevice = deviceResult.devices.find(d => d.is_active);
               if (activeDevice && activeDevice.id) {
-                toast({ title: 'Dispositivo Activo Detectado', description: `Se usará ${activeDevice.name} para reproducción.`});
+                toast({ title: 'Dispositivo Activo Detectado', description: `Se usará ${activeDevice.name} para reproducción.` });
                 updateApplicationSettings({ spotifyDeviceId: activeDevice.id });
               }
             }
@@ -274,16 +269,16 @@ export default function AdminPage() {
           setIsLoadingDevices(false);
         });
       } else {
-        setAvailableDevices([]); // Clear devices if not connected
+        setAvailableDevices([]);
       }
     };
     
-    checkTokenAndLoadDevices(); // Initial check
+    checkTokenAndLoadDevices();
 
     const unsubAuthSuccess = onSpotifyAuthSuccess(() => {
       toast({ title: 'Spotify Conectado', description: 'Has iniciado sesión con Spotify correctamente.' });
       setSpotifyConnected(true);
-      checkTokenAndLoadDevices(); // Reload devices on auth success
+      checkTokenAndLoadDevices();
     });
     const unsubReauthRequired = onSpotifyReauthRequired(() => {
       toast({ title: 'Autenticación Requerida', description: 'Necesitas volver a iniciar sesión con Spotify.', variant: 'destructive' });
@@ -301,11 +296,7 @@ export default function AdminPage() {
       unsubReauthRequired();
       unsubDisconnected();
     };
-  }, [toast, config.spotifyDeviceId]); // Added config.spotifyDeviceId to dependencies for auto-selection logic
-
-
-  // Handle Track End Notification - Keep for now, will be refactored or removed in Step 4
-  // const handleTrackEndNotification = async (endedTrackId: string | null) => { ... }
+  }, [toast, config.spotifyDeviceId]);
 
 
   // Remove Song from Queue via IPC
@@ -314,32 +305,22 @@ export default function AdminPage() {
     const result = await removeSongFromQueue(spotifyTrackId);
     if (result.success) {
       toast({ title: 'Canción eliminada', description: 'La canción ha sido eliminada de la cola.' });
-      // UI will update via onSongQueueUpdated listener
     } else {
       toast({ title: 'Error', description: result.error || 'No se pudo eliminar la canción.', variant: 'destructive' });
     }
   };
 
-  // Move Song in Queue - This needs to be re-thought. Electron-store itself doesn't have ordering logic beyond array order.
-  // For now, this functionality might be disabled or simplified. The current Firebase implementation relies on an 'order' field.
-  // A simple re-ordering would mean setting the whole queue again.
   const handleMove = async (index: number, direction: -1 | 1) => {
     toast({ title: 'Función no disponible', description: 'Reordenar la cola se implementará de otra forma.', variant: 'info' });
-    // Implementation would involve:
-    // 1. Get current queue
-    // 2. Reorder in client
-    // 3. Call a new IPC handler like 'set-song-queue' that replaces the entire queue.
-    // This is a bit heavy, so deferring for now.
   };
 
   // Spotify Connect/Disconnect via IPC
   const handleSpotifyAction = async () => {
     if (!isElectron()) return;
     if (spotifyConnected) {
-      const result = await spotifyLogout(); // Use new IPC logout
+      const result = await spotifyLogout();
       if (result.success) {
         toast({ title: "Spotify Desconectado", description: result.message || "Has cerrado la sesión de Spotify." });
-        // UI update will be handled by onSpotifyDisconnected listener
       } else {
         toast({ title: "Error al Desconectar", description: result.error || "No se pudo cerrar la sesión de Spotify.", variant: "destructive" });
       }
@@ -348,84 +329,59 @@ export default function AdminPage() {
       if (!result.success) {
         toast({ title: "Error de Conexión", description: result.error || "No se pudo iniciar la conexión con Spotify.", variant: "destructive" });
       }
-      // Success is handled by onSpotifyAuthSuccess listener
     }
   };
 
   // Add Song to Queue via IPC
   const handleAddSong = async (song: Song) => {
     if (!isElectron()) return;
-
     const exists = queue.some((q) => q.spotifyTrackId === song.spotifyTrackId);
     if (exists) {
       toast({ title: 'Canción repetida', description: 'Esa canción ya está en la cola.', variant: 'destructive' });
       return;
     }
-
-    // Omit 'addedAt' as main process will add it
     const songToAdd: Omit<ElectronSong, 'addedAt'> = {
       spotifyTrackId: song.spotifyTrackId,
       title: song.title,
       artist: song.artist,
-      albumArtUrl: song.albumArtUrl || undefined, // Ensure it's undefined if null/empty
+      albumArtUrl: song.albumArtUrl || undefined,
     };
-
     const result = await addSongToQueue(songToAdd);
     if (result.success) {
       toast({ title: 'Canción añadida', description: `${song.title} ha sido añadida a la cola.` });
       setSearchTerm('');
       setSearchResults([]);
-      // UI will update via onSongQueueUpdated listener
     } else {
       toast({ title: 'Error', description: result.error || 'No se pudo añadir la canción.', variant: 'destructive' });
     }
   };
 
-  // Search Songs
+  // Search Songs via IPC
   const doSearch = useCallback(async () => {
-    if (!searchTerm.trim() || !config) {
+    if (!isElectron() || !searchTerm.trim() || !config) {
       setSearchResults([]);
       return;
     }
-
     if (config.searchMode === 'playlist' && !config.playlistId) {
-      toast({
-        title: 'Playlist no configurada',
-        description: 'Primero configura una playlist.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Playlist no configurada', description: 'Primero configura una playlist.', variant: 'destructive' });
       return;
     }
-
     setIsLoadingSearch(true);
-    try {
-      const params = new URLSearchParams({
-        q: searchTerm,
-        mode: config.searchMode,
-      });
-      if (config.searchMode === 'playlist' && config.playlistId) {
-        params.append('playlistId', config.playlistId);
-      }
-
-      const res = await fetch(`/api/searchSpotify?${params.toString()}`);
-      const data = await res.json();
-      const results = Array.isArray(data.results) ? data.results : [];
-      const songs: Song[] = Array.isArray(results)
-        ? results.map((t: any) => ({
-            spotifyTrackId: t.spotifyTrackId || t.id,
-            title: t.title || t.name,
-            artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-            albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-          }))
-        : [];
-
-      setSearchResults(songs);
-    } catch (e: any) {
-      console.error('Error búsqueda Spotify:', e);
-      toast({ title: 'Error', description: e.message });
-    } finally {
-      setIsLoadingSearch(false);
+    const result = await searchSpotifyLocally({
+      searchTerm: searchTerm,
+      searchMode: config.searchMode,
+      playlistId: config.playlistId,
+      // limit: 20 // Example limit, adjust as needed
+    });
+    if (result.success && result.results) {
+      // Assuming result.results are already in the local Song format or compatible
+      setSearchResults(result.results as Song[]);
+    } else {
+      setSearchResults([]);
+      toast({ title: 'Error de Búsqueda', description: result.error || 'No se pudieron buscar canciones.', variant: 'destructive' });
+      console.error("Error searching Spotify via IPC:", result.error);
     }
+    setIsLoadingSearch(false);
   }, [searchTerm, config, toast]);
 
   useEffect(() => {
@@ -439,36 +395,30 @@ export default function AdminPage() {
     return () => clearTimeout(delay);
   }, [searchTerm, doSearch]);
 
-  // Load All Songs from Playlist
+  // Load All Songs from Playlist via IPC
   const handleLoadAllSongs = async () => {
-    if (!config || config.searchMode !== 'playlist' || !config.playlistId) {
-      toast({
-        title: 'Error de Configuración',
-        description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.',
-        variant: 'destructive',
-      });
+    if (!isElectron() || !config || config.searchMode !== 'playlist' || !config.playlistId) {
+      toast({ title: 'Error de Configuración', description: 'La búsqueda debe estar en modo playlist y con una playlist configurada.', variant: 'destructive' });
       return;
     }
     setIsLoadingSearch(true);
-    try {
-      const res = await fetch(`/api/searchSpotify?mode=playlist&playlistId=${config.playlistId}&limit=100`);
-      const data = await res.json();
-      const results = Array.isArray(data.results) ? data.results : [];
-      const songs: Song[] = Array.isArray(results)
-        ? results.map((t: any) => ({
-            spotifyTrackId: t.spotifyTrackId || t.id,
-            title: t.title || t.name,
-            artist: Array.isArray(t.artists) ? t.artists.join(', ') : t.artist,
-            albumArtUrl: t.albumArtUrl || t.album?.images?.[0]?.url || null,
-          }))
-        : [];
-
-      setSearchResults(songs);
-    } catch (e: any) {
-      toast({ title: 'Error al cargar', description: e.message });
-    } finally {
-      setIsLoadingSearch(false);
+    // Call searchSpotifyLocally with empty searchTerm to get all playlist tracks
+    // The main process handler for searchSpotifyLocally should be designed to return all tracks
+    // from the specified playlistId when searchTerm is empty or null.
+    const result = await searchSpotifyLocally({
+      searchTerm: '', // Empty search term implies loading all from playlist
+      searchMode: 'playlist',
+      playlistId: config.playlistId,
+      // limit: 100 // Example: if the IPC handler supports a limit for "all songs"
+    });
+    if (result.success && result.results) {
+      setSearchResults(result.results as Song[]);
+    } else {
+      setSearchResults([]);
+      toast({ title: 'Error al Cargar Playlist', description: result.error || 'No se pudo cargar la playlist.', variant: 'destructive' });
+      console.error("Error loading all songs from playlist via IPC:", result.error);
     }
+    setIsLoadingSearch(false);
   };
 
   // Save Config via IPC
@@ -477,13 +427,11 @@ export default function AdminPage() {
     const newSettings: Partial<ElectronSettings> = {
       searchMode: config.searchMode,
       playlistId: playlistIdInput.trim() || null,
-      // spotifyDeviceId is not managed here, but preserve it if it exists in current config
       spotifyDeviceId: config.spotifyDeviceId 
     };
     const result = await updateApplicationSettings(newSettings);
     if (result.success) {
       toast({ title: 'Configuración guardada', description: 'Los cambios se han guardado correctamente.' });
-      // UI will update via onApplicationSettingsUpdated listener
     } else {
       toast({ title: 'Error', description: result.error || 'No se pudo guardar la configuración.', variant: 'destructive' });
     }
@@ -495,18 +443,39 @@ export default function AdminPage() {
     const isConfirmed = window.confirm("¿Estás seguro de que quieres vaciar completamente la cola? Esta acción no se puede deshacer.");
     if (!isConfirmed) return;
 
-    setIsLoadingQueue(true); // Visually indicate loading
+    setIsLoadingQueue(true);
     const result = await clearSongQueue();
     if (result.success) {
       toast({ title: 'Cola Vaciada', description: 'Se ha eliminado toda la cola de reproducción.' });
-      // UI will update via onSongQueueUpdated listener
     } else {
       toast({ title: 'Error', description: result.error || 'No se pudo vaciar la cola.', variant: 'destructive' });
     }
-    // isLoadingQueue will be set to false by the listener or if initial load finishes
+    // isLoadingQueue state will be managed by the queue listener or initial load effect
   };
 
-  if (isLoadingConfig) { // Removed loadingAuth
+  const handleSaveCredentials = async () => {
+    if (!isElectron()) {
+      toast({ title: 'Error', description: 'Esta función solo está disponible en Electron.', variant: 'destructive' });
+      return;
+    }
+    if (!spotifyClientIdInput.trim() || !spotifyClientSecretInput.trim()) {
+      toast({ title: 'Error', description: 'Client ID y Client Secret son requeridos.', variant: 'destructive' });
+      return;
+    }
+    setIsSavingCredentials(true);
+    const result = await setSpotifyCredentials(spotifyClientIdInput, spotifyClientSecretInput);
+    if (result.success) {
+      toast({ title: 'Credenciales Guardadas', description: result.message || 'Las credenciales de Spotify se han guardado.' });
+      // Optionally clear inputs after saving, or fetch and display the stored client ID (masked)
+      // setSpotifyClientIdInput(''); // Example: Clear input after save
+      // setSpotifyClientSecretInput(''); // Example: Clear input after save
+    } else {
+      toast({ title: 'Error al Guardar', description: result.error || 'No se pudieron guardar las credenciales.', variant: 'destructive' });
+    }
+    setIsSavingCredentials(false);
+  };
+
+  if (isLoadingConfig || isLoadingCurrentPlaying) { 
     return (
       <div className="flex justify-center items-center min-h-screen">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
@@ -514,11 +483,6 @@ export default function AdminPage() {
       </div>
     );
   }
-
-  // User check removed
-  // if (!user) {
-  //   return null;
-  // }
 
   return (
     <div className="container mx-auto p-4 flex flex-col min-h-screen">
@@ -533,11 +497,13 @@ export default function AdminPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {currentPlaying && currentPlaying.title ? (
+              {isLoadingCurrentPlaying ? (
+                <Skeleton className="h-16 w-full" />
+              ) : currentPlaying && currentPlaying.isPlaying && currentPlaying.title ? (
                 <div className="flex gap-4 items-center">
                   <Image
                     src={currentPlaying.albumArtUrl || `https://picsum.photos/seed/${currentPlaying.spotifyTrackId}/64`}
-                    alt={currentPlaying.title}
+                    alt={currentPlaying.title || 'Album art'}
                     width={64}
                     height={64}
                     className="rounded-md shadow-md"
@@ -545,10 +511,14 @@ export default function AdminPage() {
                   <div className="flex-1 overflow-hidden">
                     <p className="font-semibold truncate">{currentPlaying.title}</p>
                     <p className="text-sm text-muted-foreground truncate">{currentPlaying.artist}</p>
+                    {/* Optional: Progress bar if IPC provides progress_ms and duration_ms */}
+                    {currentPlaying.progress_ms !== undefined && currentPlaying.duration_ms !== undefined && currentPlaying.duration_ms > 0 && (
+                       <progress value={currentPlaying.progress_ms} max={currentPlaying.duration_ms} className="w-full mt-1 h-1 [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary" />
+                    )}
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo.</p>
+                <p className="text-sm text-muted-foreground italic">Nada está sonando ahora mismo o el reproductor no está activo.</p>
               )}
             </CardContent>
           </Card>
@@ -820,7 +790,7 @@ export default function AdminPage() {
                           toast({ title: 'Error Dispositivos', description: deviceResult.error || 'No se pudo refrescar los dispositivos.', variant: 'destructive' });
                         }
                         setIsLoadingDevices(false);
-                    }} title="Refrescar dispositivos">
+                    }} title="Refrescar dispositivos" disabled={!isElectron() || isLoadingDevices}>
                       <RefreshCw className={`h-4 w-4 ${isLoadingDevices ? 'animate-spin' : ''}`} />
                     </Button>
                   </div>
@@ -834,6 +804,53 @@ export default function AdminPage() {
                 )}
               </div>
               )}
+
+              <hr className="my-4 border-border" />
+              
+              {/* Spotify API Credentials Section */}
+              <div>
+                <Label className="text-base font-medium mb-2 block">Credenciales API Spotify</Label>
+                {!isElectron() ? (
+                  <p className="text-xs text-red-600 p-3 bg-destructive/10 rounded-md">
+                    La configuración de credenciales solo está disponible cuando la aplicación se ejecuta en Electron.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <Label htmlFor="spotify-client-id" className="text-sm font-normal">Spotify Client ID</Label>
+                      <Input
+                        id="spotify-client-id"
+                        type="text"
+                        placeholder="Tu Spotify Client ID"
+                        value={spotifyClientIdInput}
+                        onChange={(e) => setSpotifyClientIdInput(e.target.value)}
+                        disabled={isSavingCredentials}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="spotify-client-secret" className="text-sm font-normal">Spotify Client Secret</Label>
+                      <Input
+                        id="spotify-client-secret"
+                        type="password"
+                        placeholder="Tu Spotify Client Secret"
+                        value={spotifyClientSecretInput}
+                        onChange={(e) => setSpotifyClientSecretInput(e.target.value)}
+                        disabled={isSavingCredentials}
+                        className="text-xs"
+                      />
+                    </div>
+                    <Button onClick={handleSaveCredentials} className="w-full" disabled={isSavingCredentials || !spotifyClientIdInput || !spotifyClientSecretInput}>
+                      {isSavingCredentials ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Guardar Credenciales
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Estas credenciales se almacenan de forma segura en tu dispositivo.
+                      Se utilizan para autenticar la aplicación con Spotify.
+                    </p>
+                  </div>
+                )}
+              </div>
 
             </CardContent>
             <CardFooter className="flex flex-col gap-2 pt-4 border-t">
