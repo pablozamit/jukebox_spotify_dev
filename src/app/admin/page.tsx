@@ -2,9 +2,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-// Firebase Auth and DB imports removed
 import { useToast } from '@/hooks/use-toast';
-// import useSWR from 'swr'; // No longer used
 import {
   // IPC Methods from the new wrapper
   loginToSpotify,
@@ -49,18 +47,6 @@ import {
 import Image from 'next/image';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-// Use ElectronSong for queue items
-// interface QueueSong {
-//   id: string; // This might need to be adapted if Electron side doesn't use a separate 'id'
-//   spotifyTrackId: string;
-//   title: string;
-//   artist: string;
-//   albumArtUrl?: string;
-//   order?: number; // Order might be implicit by array order from electron-store
-//   addedByUserId?: string; // User concept is removed for now
-//   timestampAdded: number; // Will be 'addedAt' from ElectronSong
-//   votes?: number;
-// }
 type QueueSong = ElectronSong & { id?: string }; // Keep 'id' if used for React keys, map from spotifyTrackId
 
 
@@ -72,43 +58,14 @@ interface Song {
   albumArtUrl?: string;
 }
 
-// Use ElectronSettings for config
-// interface SpotifyConfig {
-//   searchMode: 'playlist' | 'all';
-//   playlistId?: string;
-//   spotifyConnected?: boolean; // This will be derived from token status
-// }
 type SpotifyConfig = ElectronSettings;
 
 
-// Local PlaylistDetails might conflict if structure is different from IPC one.
-// For now, assuming IPC one is desired. If not, one needs to be aliased.
-// interface PlaylistDetails {
-//   name: string;
-//   description: string;
-//   imageUrl: string | null;
-//   externalUrl?: string;
-// }
 // Using PlaylistDetails from electron-ipc
-
-// interface SpotifyStatus { // This interface seems unused, can be removed
-//   spotifyConnected: boolean;
-//   tokensOk: boolean;
-//   playbackAvailable: boolean;
-//   activeDevice?: { id: string; name: string; type: string };
-//   message?: string;
-// }
-
-// const fetcher = async (url: string) => { // fetcher is no longer needed
-//   const res = await fetch(url);
-//   if (!res.ok) throw new Error('Error al cargar datos.');
-//   return res.json();
-// };
 
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
-  // const isSyncingRef = useRef(false); // This was for the removed syncInterval
 
   const [queue, setQueue] = useState<QueueSong[]>([]);
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
@@ -159,12 +116,9 @@ export default function AdminPage() {
     return () => clearInterval(intervalId); // Cleanup interval on unmount
   }, [toast]);
 
-  // Auth is handled by Electron now, no Firebase auth check needed.
-  // Assuming admin page is accessible if app is running in Electron.
   useEffect(() => {
     if (!isElectron()) {
       toast({ title: "Error", description: "Esta aplicación está diseñada para Electron.", variant: "destructive" });
-      // Optionally redirect or disable functionality
     }
   }, [toast]);
 
@@ -184,7 +138,6 @@ export default function AdminPage() {
 
     const unsubscribe = onSongQueueUpdated((updatedQueue) => {
       setQueue(updatedQueue.map(s => ({...s, id: s.spotifyTrackId})));
-      // toast({ title: 'Cola actualizada', description: 'La cola de reproducción ha cambiado.' }); // Can be too noisy
     });
     return () => unsubscribe();
   }, [toast]);
@@ -206,7 +159,6 @@ export default function AdminPage() {
     const unsubscribe = onApplicationSettingsUpdated((updatedSettings) => {
       setConfig(updatedSettings);
       setPlaylistIdInput(updatedSettings.playlistId || '');
-      // toast({ title: 'Configuración actualizada', description: 'Los ajustes han cambiado.' }); // Can be too noisy
     });
     return () => unsubscribe();
   }, [toast]);
@@ -861,7 +813,6 @@ export default function AdminPage() {
               <Button variant="outline" onClick={() => router.push('/')} className="w-full">
                 <Home className="mr-2 h-4 w-4" /> Ir al Jukebox
               </Button>
-              {/* Sign out button and "Forzar Sincronización" button removed as their original Firebase-dependent logic is obsolete */}
               <Button
                 variant="destructive"
                 className="w-full"

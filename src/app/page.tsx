@@ -26,9 +26,9 @@ import {
   AlertTriangle,
   RefreshCw,
   ListVideo,
+  Settings, // Added Settings icon
 } from 'lucide-react';
 import { searchSpotify } from '@/services/spotify';
-// Firebase specific imports removed
 import {
   // IPC Methods from the new wrapper
   getSongQueue,
@@ -47,6 +47,7 @@ import {
 } from '@/lib/electron-ipc';
 import { ToastAction } from '@/components/ui/toast';
 import Image from 'next/image';
+import Link from 'next/link'; // Added Link import
 import {
   TooltipProvider,
   Tooltip,
@@ -94,7 +95,6 @@ export default function ClientPage() {
   const [queue, setQueue] = useState<QueueSong[]>([]); // Uses updated QueueSong type
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
-  // const [canAddSong, setCanAddSong] = useState(true); // This logic will change with Electron
   const [userSessionId, setUserSessionId] = useState<string | null>(null); // Keep for now, might be used for local identification if needed
   const [appError, setAppError] = useState<string | null>(null); // Generic error state
   const [spotifyConfig, setSpotifyConfig] = useState<ElectronSettings | null>(null);
@@ -130,9 +130,6 @@ export default function ClientPage() {
   useEffect(() => {
     setIsMounted(true);
   }, []);
-
-  // // 1.1 Sincronización periódica cada 3 segundos - This will be replaced by event-driven logic
-  // useEffect(() => { ... });
 
 
   // Effect for track start and end detection using IPC
@@ -234,15 +231,56 @@ export default function ClientPage() {
       // Consider if lastPlayedTrackIdRef.current should be cleared here or when new track starts.
       // Clearing here means if user resumes the same song, it will trigger confirmTrackStarted again.
       // lastPlayedTrackIdRef.current = null; 
+    } else if (!currentPlaying.isPlaying) {
+      // Playback is stopped
+      const canAttemptResume = queue.length > 0 && spotifyConfig?.spotifyDeviceId && !syncLock.current;
+
+      if (canAttemptResume) {
+        console.log("Playback is stopped, queue has songs. Attempting to play next from queue.");
+        syncLock.current = true; 
+
+        const nextSongToPlay = queue[0]; // Assumes queue is sorted by addedAt
+        const trackUri = nextSongToPlay.uri || `spotify:track:${nextSongToPlay.spotifyTrackId}`;
+        const deviceId = spotifyConfig.spotifyDeviceId!; // We've checked spotifyConfig.spotifyDeviceId
+
+        toast({ title: "Resuming Queue", description: `Attempting to play ${nextSongToPlay.title}.` });
+
+        playTrackOnSpotifyIPC(trackUri, deviceId)
+          .then(playResult => {
+            if (playResult.success) {
+              console.log(`Playback of ${nextSongToPlay.title} initiated from stopped state.`);
+              // lastPlayedTrackIdRef will be updated by the "new track started" logic when currentPlaying updates
+            } else {
+              toast({ title: "Playback Error", description: playResult.error || "Could not resume queue.", variant: "destructive" });
+              console.error("Error resuming queue via IPC:", playResult.error, playResult.details);
+               if (playResult.error?.includes("device not found") || playResult.details?.toString().includes("NO_ACTIVE_DEVICE")) {
+                 toast({ title: "Device Issue", description: "Spotify device not found or inactive for queue resumption. Please check Spotify and Admin settings.", variant: "destructive", duration: 7000 });
+               }
+            }
+          })
+          .catch(err => {
+            toast({ title: "IPC Error", description: `Failed to resume queue: ${err.message}`, variant: "destructive" });
+          })
+          .finally(() => {
+            setTimeout(() => {
+              syncLock.current = false;
+            }, 5000); // Release lock after an attempt
+          });
+      } else if (lastPlayedTrackIdRef.current) {
+        // This condition means: playback is stopped, AND
+        // (queue is empty OR deviceId is not set OR syncLock is already held by another process like track ending)
+        // AND a track *was* previously playing (lastPlayedTrackIdRef.current is not null).
+        // This is the state where we should truly consider playback as "finished for now".
+        if (syncLock.current && !canAttemptResume) { 
+            console.log("Playback stopped, not resuming (syncLock was true, e.g. from a recently ended track). Resetting syncLock.");
+            syncLock.current = false; // Reset lock if it was held by the track ending logic
+        }
+        console.log("Playback stopped, not resuming from queue (e.g. queue empty or device issue). Clearing last played track ID.");
+        lastPlayedTrackIdRef.current = null;
+      }
     }
-  }, [currentPlaying, isMounted, toast]);
+  }, [currentPlaying, isMounted, toast, queue, spotifyConfig]);
 
-
-  // // Efecto para sincronizar la siguiente canción cuando queda poco tiempo - Replaced by above
-  // useEffect(() => { ... });
-
-  // // 12. Reproducir siguiente canción automáticamente si no hay nada sonando - Replaced by above
-  // useEffect(() => { ... });
 
   // 2. Generar o recuperar sesión sencilla - Kept for now, can be used for local identification if desired
   useEffect(() => {
@@ -339,7 +377,6 @@ export default function ClientPage() {
     const unsubQueue = onSongQueueUpdated((updatedQueue) => {
       setQueue(updatedQueue.map(s => ({ ...s, id: s.spotifyTrackId, order: s.addedAt })));
       // Consider if a toast is needed for every queue update, might be too noisy
-      // toast({ title: 'Cola actualizada', description: 'La cola de reproducción ha cambiado.' });
     });
 
     return () => unsubQueue();
@@ -677,8 +714,25 @@ setSearchResults(safeResults);
     <div className="container mx-auto p-4 min-h-screen bg-gradient-to-br from-background via-background to-secondary/10">
       {/* ─── Cabecera ───────────────────────────────────────────────────────── */}
       <header className="text-center my-8 space-y-2">
-        <h1 className="text-4xl md:text-5xl font-bold text-primary flex items-center justify-center gap-3">
-          <Music className="h-8 w-8 md:h-10 md:w-10" /> Bar Jukebox
+        <h1 className="text-4xl md:text-5xl font-bold text-primary flex items-center justify-center gap-3 relative">
+          <Music className="h-8 w-8 md:h-10 md:w-10" /> 
+          Bar Jukebox
+          <div className="absolute right-0 top-1/2 -translate-y-1/2">
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link href="/admin" passHref>
+                    <Button variant="ghost" size="icon" aria-label="Ir a Configuración">
+                      <Settings className="h-6 w-6" />
+                    </Button>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Configuración</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </h1>
         <p className="text-lg text-muted-foreground">¡Elige la banda sonora de la noche!</p>
         {spotifyConfig?.searchMode === 'playlist' && playlistDetails && (
