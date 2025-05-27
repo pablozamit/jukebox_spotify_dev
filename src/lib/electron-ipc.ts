@@ -58,6 +58,21 @@ export function onSpotifyReauthRequired(callback: () => void): () => void {
   return () => ipcRenderer.removeListener('spotify-reauth-required', handler);
 }
 
+export async function setSpotifyCredentials(clientId: string, clientSecret: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  const ipcRenderer = getIpcRenderer();
+  if (!ipcRenderer) return { success: false, error: 'ipcRenderer not available' };
+  return ipcRenderer.invoke('set-spotify-credentials', { clientId, clientSecret });
+}
+
+// Listen for Spotify credentials updated
+export function onSpotifyCredentialsUpdated(callback: () => void): () => void {
+  const ipcRenderer = getIpcRenderer();
+  if (!ipcRenderer) return () => {};
+  const handler = () => callback();
+  ipcRenderer.on('spotify-credentials-updated', handler);
+  return () => ipcRenderer.removeListener('spotify-credentials-updated', handler);
+}
+
 // --- Song Queue ---
 export async function getSongQueue(): Promise<{ success: boolean; queue?: Song[]; error?: string }> {
   const ipcRenderer = getIpcRenderer();

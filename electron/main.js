@@ -13,6 +13,8 @@ log.info('Electron main process started.');
 // Replace console with electron-log functions
 // console.log = log.log; // Can use log.log or log.info, log.debug etc.
 // console.error = log.error;
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // console.warn = log.warn;
 // console.info = log.info;
 // console.debug = log.debug;
@@ -72,14 +74,41 @@ const store = new Store({
   // }
 })
 
-// TODO: Replace these with your actual Spotify credentials or use environment variables
-const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'YOUR_SPOTIFY_CLIENT_ID'; // log.warn('SPOTIFY_CLIENT_ID not set, using placeholder.');
-const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'YOUR_SPOTIFY_CLIENT_SECRET'; // log.warn('SPOTIFY_CLIENT_SECRET not set, using placeholder.');
+// Attempt to load Spotify credentials from electron-store
+let SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
+let SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+
+const storedClientId = store.get('spotifyClientId');
+const storedClientSecret = store.get('spotifyClientSecret');
+
+if (storedClientId && storedClientId !== 'YOUR_SPOTIFY_CLIENT_ID' && storedClientId.trim() !== '') {
+  SPOTIFY_CLIENT_ID = storedClientId;
+  log.info('Loaded Spotify Client ID from electron-store.');
+} else {
+  log.info('Using default/environment variable for Spotify Client ID.');
+  // Fallback to placeholder if not even in env
+  if (!SPOTIFY_CLIENT_ID) {
+    SPOTIFY_CLIENT_ID = 'YOUR_SPOTIFY_CLIENT_ID';
+  }
+}
+
+if (storedClientSecret && storedClientSecret !== 'YOUR_SPOTIFY_CLIENT_SECRET' && storedClientSecret.trim() !== '') {
+  SPOTIFY_CLIENT_SECRET = storedClientSecret;
+  log.info('Loaded Spotify Client Secret from electron-store.');
+} else {
+  log.info('Using default/environment variable for Spotify Client Secret.');
+  // Fallback to placeholder if not even in env
+  if (!SPOTIFY_CLIENT_SECRET) {
+    SPOTIFY_CLIENT_SECRET = 'YOUR_SPOTIFY_CLIENT_SECRET';
+  }
+}
+
+// Log warnings if placeholders are still being used
 if (SPOTIFY_CLIENT_ID === 'YOUR_SPOTIFY_CLIENT_ID') {
-  log.warn('SPOTIFY_CLIENT_ID is not set, using placeholder. Spotify authentication will likely fail.');
+  log.warn('SPOTIFY_CLIENT_ID is not set or loaded from store, using placeholder. Spotify authentication will likely fail.');
 }
 if (SPOTIFY_CLIENT_SECRET === 'YOUR_SPOTIFY_CLIENT_SECRET') {
-  log.warn('SPOTIFY_CLIENT_SECRET is not set, using placeholder. Spotify authentication will likely fail.');
+  log.warn('SPOTIFY_CLIENT_SECRET is not set or loaded from store, using placeholder. Spotify authentication will likely fail.');
 }
 const SPOTIFY_REDIRECT_URI = 'http://localhost:9003/spotify-callback';
 const REQUIRED_SCOPES = 'user-modify-playback-state user-read-playback-state';
@@ -305,10 +334,30 @@ ipcMain.handle('get-spotify-devices', async () => {
     return { success: true, devices: response.data.devices || [] };
   } catch (error) {
     const errorMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-    console.error('GetDevices: Error fetching devices from Spotify:', errorMsg);
-     if (error.response && error.response.status === 401) {
+    log.error('GetDevices: Error fetching devices from Spotify:', errorMsg, error.stack);
+
+    const isNetworkError = error.isAxiosError && !error.response;
+    const isTimeoutError = error.code === 'ECONNABORTED';
+    const specificNetworkErrorCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH'];
+    const isSpecificNetworkError = specificNetworkErrorCodes.includes(error.code);
+
+    if (isNetworkError || isTimeoutError || isSpecificNetworkError) {
+      log.error('GetDevices: Network/Timeout error detected.');
+      if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'fetching devices', message: 'Could not connect to Spotify. Check internet connection.' });
+      return { success: false, error: 'Network error. Could not connect to Spotify.', devices: [] };
+    }
+    
+    if (error.response) {
+      if (error.response.status === 401) {
         if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
         return { success: false, error: 'Spotify token invalid. Please re-login.', devices: [] };
+      }
+      // Handle other Spotify API errors (e.g., 5xx)
+      if (error.response.status >= 500) {
+          log.error(`GetDevices: Spotify API server error: ${error.response.status}`);
+          if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'fetching devices (server error)', message: 'Spotify is temporarily unavailable.'});
+          return { success: false, error: `Spotify API server error: ${error.response.status}`, devices: [] };
+      }
     }
     return { success: false, error: `Failed to fetch devices: ${errorMsg}`, devices: [] };
   }
@@ -392,6 +441,45 @@ ipcMain.handle('spotify-logout', async () => {
   }
 });
 
+// IPC Handler for setting Spotify Credentials
+ipcMain.handle('set-spotify-credentials', async (event, { clientId, clientSecret }) => {
+  log.info('IPC: set-spotify-credentials called');
+  try {
+    if (!clientId || typeof clientId !== 'string' || !clientSecret || typeof clientSecret !== 'string') {
+      log.error('IPC: set-spotify-credentials: Client ID and Client Secret are required and must be strings.');
+      return { success: false, error: 'Client ID and Client Secret are required and must be strings.' };
+    }
+
+    store.set('spotifyClientId', clientId);
+    store.set('spotifyClientSecret', clientSecret);
+    log.info('Spotify credentials updated and stored in electron-store.');
+
+    // Update global variables for the current session
+    SPOTIFY_CLIENT_ID = clientId;
+    SPOTIFY_CLIENT_SECRET = clientSecret;
+    log.info('Global SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET updated for current session.');
+
+    // Log warnings if placeholders are still being used after update (e.g. if empty strings were passed)
+    if (SPOTIFY_CLIENT_ID === 'YOUR_SPOTIFY_CLIENT_ID' || SPOTIFY_CLIENT_ID.trim() === '') {
+      log.warn('SPOTIFY_CLIENT_ID is effectively a placeholder after update. Authentication might fail.');
+    }
+    if (SPOTIFY_CLIENT_SECRET === 'YOUR_SPOTIFY_CLIENT_SECRET' || SPOTIFY_CLIENT_SECRET.trim() === '') {
+      log.warn('SPOTIFY_CLIENT_SECRET is effectively a placeholder after update. Authentication might fail.');
+    }
+    
+    // It might be good to notify the renderer that credentials have changed,
+    // especially if this could affect UI elements or require a re-login prompt.
+    if (mainWindow) {
+      mainWindow.webContents.send('spotify-credentials-updated');
+    }
+
+    return { success: true, message: 'Spotify credentials stored successfully.' };
+  } catch (error) {
+    log.error('IPC: set-spotify-credentials: Error setting credentials:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // --- Spotify Playback Control IPC Handlers ---
 ipcMain.handle('play-track-on-spotify', async (event, { trackUri, deviceId }) => {
   console.log(`IPC: play-track-on-spotify called for track URI ${trackUri} on device ${deviceId}`);
@@ -448,13 +536,32 @@ ipcMain.handle('play-track-on-spotify', async (event, { trackUri, deviceId }) =>
     return { success: true };
   } catch (error) {
     const errorMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-    console.error('PlayTrack: Error playing track on Spotify:', errorMsg);
-    if (error.response && error.response.status === 401) {
-        if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
-        return { success: false, error: 'Spotify token invalid. Please re-login.', details: errorMsg };
+    log.error('PlayTrack: Error playing track on Spotify:', errorMsg, error.stack);
+
+    const isNetworkError = error.isAxiosError && !error.response;
+    const isTimeoutError = error.code === 'ECONNABORTED';
+    const specificNetworkErrorCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH'];
+    const isSpecificNetworkError = specificNetworkErrorCodes.includes(error.code);
+
+    if (isNetworkError || isTimeoutError || isSpecificNetworkError) {
+      log.error('PlayTrack: Network/Timeout error detected.');
+      if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'playing track', message: 'Could not connect to Spotify. Check internet connection.' });
+      return { success: false, error: 'Network error. Could not connect to Spotify.', details: errorMsg };
     }
-    if (error.response && error.response.status === 404) { // Device not found or other 404
-        return { success: false, error: 'Spotify device not found or playback issue.', details: errorMsg };
+
+    if (error.response) {
+      if (error.response.status === 401) {
+          if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
+          return { success: false, error: 'Spotify token invalid. Please re-login.', details: errorMsg };
+      }
+      if (error.response.status === 404) { // Device not found or other 404
+          return { success: false, error: 'Spotify device not found or playback issue.', details: errorMsg };
+      }
+      if (error.response.status >= 500) { // Spotify server errors
+          log.error(`PlayTrack: Spotify API server error: ${error.response.status}`);
+          if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'playing track (server error)', message: 'Spotify is temporarily unavailable.'});
+          return { success: false, error: `Spotify API server error: ${error.response.status}`, details: errorMsg };
+      }
     }
     // Other errors (e.g. 403 - player command failed: Premium required or no active device)
     return { success: false, error: `Failed to play track: ${errorMsg}`, details: errorMsg };
@@ -565,19 +672,36 @@ ipcMain.handle('search-spotify-locally', async (event, { searchTerm, searchMode,
     return { success: true, results };
 
   } catch (error) {
-    console.error('Error during Spotify search:', error.response ? error.response.data : error.message);
-    // Check for specific Spotify error codes, e.g., 401 for bad token, 429 for rate limiting
-    if (error.response && error.response.status === 401) {
-        // Token might have been revoked or expired just before the call
-        if (mainWindow) {
-            mainWindow.webContents.send('spotify-reauth-required');
-        }
-        return { success: false, error: 'Spotify token invalid. Please re-login.', results: [] };
+    log.error('Error during Spotify search:', error.response ? error.response.data : error.message, error.stack);
+
+    const isNetworkError = error.isAxiosError && !error.response;
+    const isTimeoutError = error.code === 'ECONNABORTED';
+    const specificNetworkErrorCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH'];
+    const isSpecificNetworkError = specificNetworkErrorCodes.includes(error.code);
+    
+    if (isNetworkError || isTimeoutError || isSpecificNetworkError) {
+      log.error('Search: Network/Timeout error detected.');
+      if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'searching Spotify', message: 'Could not connect to Spotify. Check internet connection.' });
+      return { success: false, errorType: 'SPOTIFY_API_UNAVAILABLE', message: 'Network error. Could not connect to Spotify.', results: [] };
     }
-    if (error.response && error.response.status === 429) {
-        return { success: false, error: 'Rate limited by Spotify. Please try again later.', results: [] };
+
+    if (error.response) {
+      if (error.response.status === 401) {
+          if (mainWindow) {
+              mainWindow.webContents.send('spotify-reauth-required');
+          }
+          return { success: false, errorType: 'SPOTIFY_AUTH_ERROR', message: 'Spotify token invalid. Please re-login.', results: [] };
+      }
+      if (error.response.status === 429) {
+          return { success: false, errorType: 'SPOTIFY_RATE_LIMIT', message: 'Rate limited by Spotify. Please try again later.', results: [] };
+      }
+      if (error.response.status >= 500) { // Spotify server errors
+          log.error(`Search: Spotify API server error: ${error.response.status}`);
+          if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'searching Spotify (server error)', message: 'Spotify is temporarily unavailable.'});
+          return { success: false, errorType: 'SPOTIFY_API_SERVER_ERROR', message: `Spotify API server error: ${error.response.status}`, results: [] };
+      }
     }
-    return { success: false, error: error.message || 'Failed to search Spotify.', results: [] };
+    return { success: false, errorType: 'UNKNOWN_ERROR', message: error.message || 'Failed to search Spotify.', results: [] };
   }
 });
 
@@ -592,7 +716,10 @@ ipcMain.handle('get-spotify-tokens', async () => {
 });
 
 // Function to refresh Spotify token
-async function refreshSpotifyToken() {
+async function refreshSpotifyToken(attempt = 1) {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 2000;
+
   const refreshToken = store.get('spotifyRefreshToken');
   const clientId = store.get('spotifyClientId');
   const clientSecret = store.get('spotifyClientSecret');
@@ -602,7 +729,7 @@ async function refreshSpotifyToken() {
     return { success: false, error: 'Missing refresh token or credentials.' };
   }
 
-  console.log('Attempting to refresh Spotify token...');
+  log.info(`Attempting to refresh Spotify token (Attempt ${attempt}/${MAX_RETRIES})...`);
   try {
     const response = await axios.post('https://accounts.spotify.com/api/token', querystring.stringify({
       grant_type: 'refresh_token',
@@ -612,8 +739,10 @@ async function refreshSpotifyToken() {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': 'Basic ' + Buffer.from(clientId + ':' + clientSecret).toString('base64'),
       },
+      // Add a timeout for the request
+      timeout: 5000 // 5 seconds
     });
-    log.info('Spotify token refreshed via API call.');
+    log.info('Spotify token refreshed via API call successfully.');
     const { access_token, expires_in, scope, token_type, refresh_token: newRefreshToken } = response.data;
     const expiresAt = Date.now() + (expires_in * 1000);
 
@@ -636,7 +765,19 @@ async function refreshSpotifyToken() {
     };
 
   } catch (axiosError) {
-    log.error('Error refreshing Spotify token via API:', axiosError.message, axiosError.stack);
+    log.error(`Error refreshing Spotify token via API (Attempt ${attempt}/${MAX_RETRIES}):`, axiosError.message, axiosError.stack);
+    
+    const isNetworkError = axiosError.isAxiosError && !axiosError.response;
+    const isTimeoutError = axiosError.code === 'ECONNABORTED'; // Axios specific timeout error code
+    const specificNetworkErrorCodes = ['ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH'];
+    const isSpecificNetworkError = specificNetworkErrorCodes.includes(axiosError.code);
+
+    if ((isNetworkError || isTimeoutError || isSpecificNetworkError) && attempt < MAX_RETRIES) {
+      log.warn(`Network/Timeout error during token refresh (Attempt ${attempt}/${MAX_RETRIES}). Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+      await delay(RETRY_DELAY_MS);
+      return refreshSpotifyToken(attempt + 1); // Recursive call for retry
+    }
+
     let errorType = 'SPOTIFY_AUTH_ERROR';
     let clientMessage = 'Failed to refresh Spotify session.';
     const errorDetails = axiosError.response ? axiosError.response.data : axiosError.message;
@@ -644,17 +785,24 @@ async function refreshSpotifyToken() {
     if (axiosError.response) {
       log.error('Spotify Refresh API Error Response:', axiosError.response.status, axiosError.response.data);
       if (axiosError.response.status === 400 || axiosError.response.status === 401) {
-        console.error('Refresh token might be invalid or client authentication failed. User may need to re-login.');
+        log.error('Refresh token might be invalid or client authentication failed. User may need to re-login.');
         clientMessage = 'Spotify session invalid. Please log in again.';
-        // Potentially clear tokens if refresh token is definitively invalid
-        // store.delete('spotifyAccessToken'); // etc.
         if (mainWindow) mainWindow.webContents.send('spotify-reauth-required');
       }
-    } else if (axiosError.request) {
-      log.error('Spotify Refresh API No Response:', axiosError.request);
+      // For other HTTP errors, don't necessarily emit spotify-api-unavailable unless it's a server-side issue (5xx)
+      else if (axiosError.response.status >= 500) {
+        log.error('Spotify API server error during token refresh.');
+        errorType = 'SPOTIFY_API_SERVER_ERROR';
+        clientMessage = 'Spotify is temporarily unavailable. Please try again later.';
+        if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'refreshing token (server error)', message: clientMessage });
+      }
+    } else if (isNetworkError || isTimeoutError || isSpecificNetworkError) { // Persistent network error after retries
+      log.error('Persistent network/timeout error after all retries during token refresh.');
       errorType = 'SPOTIFY_API_UNAVAILABLE';
       clientMessage = 'Could not connect to Spotify to refresh session. Check internet connection.';
+      if (mainWindow) mainWindow.webContents.send('spotify-api-unavailable', { context: 'refreshing token (network error)', message: clientMessage });
     } else {
+      // Non-Axios error or unexpected error
       clientMessage = `Error setting up Spotify refresh request: ${axiosError.message}`;
     }
     return { success: false, errorType, message: clientMessage, details: errorDetails };
@@ -713,6 +861,14 @@ ipcMain.handle('add-song-to-queue', async (event, songObject) => {
       throw new Error('Invalid song object provided.');
     }
     const currentQueue = store.get('songQueue', []);
+    
+    // Check if song already exists in the queue
+    const songExists = currentQueue.some(song => song.spotifyTrackId === songObject.spotifyTrackId);
+    if (songExists) {
+      log.warn(`IPC: add-song-to-queue: Attempted to add duplicate song: ${songObject.title} (ID: ${songObject.spotifyTrackId})`);
+      return { success: false, error: 'Song already in queue.', queue: currentQueue };
+    }
+
     const newSong = {
       ...songObject,
       addedAt: Date.now()
@@ -838,6 +994,36 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // Proactive Spotify token refresh
+  setInterval(async () => {
+    log.info('Periodic Spotify token check running...');
+    const expiresAt = store.get('spotifyExpiresAt');
+    const refreshToken = store.get('spotifyRefreshToken');
+
+    if (!refreshToken) {
+      log.info('No refresh token found, skipping proactive refresh.');
+      return;
+    }
+
+    // Check if token expires within the next 10 minutes
+    if (expiresAt && (expiresAt - Date.now() < 10 * 60 * 1000)) {
+      log.info('Spotify token nearing expiration, attempting proactive refresh.');
+      refreshSpotifyToken()
+        .then(refreshResult => {
+          if (refreshResult.success) {
+            log.info('Proactive Spotify token refresh successful.');
+          } else {
+            log.warn('Proactive Spotify token refresh failed:', refreshResult.message);
+          }
+        })
+        .catch(error => {
+          log.error('Error during proactive Spotify token refresh:', error);
+        });
+    } else {
+      log.info('Spotify token is not nearing expiration, no proactive refresh needed.');
+    }
+  }, 15 * 60 * 1000); // Run every 15 minutes
 });
 
 app.on('window-all-closed', function () {
