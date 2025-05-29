@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Removed Geist font import as it caused errors */
+/* body {
+  font-family: var(--font-geist-sans), sans-serif;
+} */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* White */
+    --foreground: 222.2 84% 4.9%; /* Dark Blue */
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 221 44% 18%; /* Dark Blue #192841 */
+    --primary-foreground: 210 40% 98%; /* Almost White */
+
+    --secondary: 210 20% 84%; /* Light Gray #CCD6DD */
+    --secondary-foreground: 222.2 47.4% 11.2%; /* Darker Blue */
+
+    --muted: 210 40% 96.1%; /* Lighter Gray */
+    --muted-foreground: 215.4 16.3% 46.9%; /* Grayish Blue */
+
+    --accent: 93 70% 68%; /* Lime Green #A3E47B */
+    --accent-foreground: 222.2 47.4% 11.2%; /* Darker Blue */
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 214.3 31.8% 91.4%; /* Light Border */
+    --input: 214.3 31.8% 91.4%; /* Light Border */
+    --ring: 221 44% 18%; /* Dark Blue for focus rings */
+
+    --chart-1: 221 44% 18%; /* Primary */
+    --chart-2: 93 70% 68%; /* Accent */
+    --chart-3: 210 20% 84%; /* Secondary */
+    --chart-4: 215.4 16.3% 46.9%; /* Muted Foreground */
+    --chart-5: 222.2 47.4% 11.2%; /* Secondary Foreground */
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%; /* Dark Blue */
+    --foreground: 210 40% 98%; /* Almost White */
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%; /* Almost White */
+    --primary-foreground: 221 44% 18%; /* Dark Blue #192841 */
+
+    --secondary: 217.2 32.6% 17.5%; /* Darker Grayish Blue */
+    --secondary-foreground: 210 40% 98%; /* Almost White */
+
+    --muted: 217.2 32.6% 17.5%; /* Darker Grayish Blue */
+    --muted-foreground: 215 20.2% 65.1%; /* Lighter Grayish Blue */
+
+    --accent: 93 70% 68%; /* Lime Green #A3E47B */
+    --accent-foreground: 221 44% 18%; /* Dark Blue #192841 */
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 217.2 32.6% 17.5%; /* Darker Grayish Blue */
+    --input: 217.2 32.6% 17.5%; /* Darker Grayish Blue */
+    --ring: 93 70% 68%; /* Lime Green for focus rings */
+
+    --chart-1: 210 40% 98%; /* Primary Dark */
+    --chart-2: 93 70% 68%; /* Accent */
+    --chart-3: 217.2 32.6% 17.5%; /* Secondary Dark */
+    --chart-4: 215 20.2% 65.1%; /* Muted Foreground Dark */
+    --chart-5: 221 44% 18%; /* Primary Dark Foreground */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans; /* Use default sans-serif */
+    font-feature-settings: "rlig" 1,"calt" 1;
+  }
+}
