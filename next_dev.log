@@ -1,0 +1,19 @@
+
+> nextn@0.1.0 dev
+> next dev -p 9002 --hostname 0.0.0.0
+
+   ▲ Next.js 15.3.1
+   - Local:        http://localhost:9002
+   - Network:      http://0.0.0.0:9002
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+ ✓ Ready in 3.7s
+ ⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+   ▲ Next.js 15.3.1
+   - Local:        http://localhost:9002
+   - Network:      http://0.0.0.0:9002
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+ ✓ Ready in 2.9s

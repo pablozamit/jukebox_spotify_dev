@@ -1,0 +1,6 @@
+
+> nextn@0.1.0 start:electron
+> electron .
+
+[0529/095710.624576:FATAL:electron/shell/app/electron_main_delegate.cc:288] Running as root without --no-sandbox is not supported. See https://crbug.com/638180.
+/app/node_modules/electron/dist/electron exited with signal SIGTRAP

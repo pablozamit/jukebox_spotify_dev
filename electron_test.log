@@ -1,0 +1,34 @@
+
+> nextn@0.1.0 start:electron
+> electron . --no-sandbox
+
+[345:0529/100335.894863:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+10:03:37.178 › Electron main process started.
+10:03:37.186 › App threw an error during load
+10:03:37.187 › TypeError: Store is not a constructor
+    at Object.<anonymous> (/app/electron/main.js:26:15)
+    at Module._compile (node:internal/modules/cjs/loader:1738:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1904:10)
+    at Module.load (node:internal/modules/cjs/loader:1472:32)
+    at Module._load (node:internal/modules/cjs/loader:1289:12)
+    at c._load (node:electron/js2c/node_init:2:17950)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:242:24)
+    at cjsLoader (node:internal/modules/esm/translators:270:5)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:200:7)
+[1m[47m[31mA JavaScript error occurred in the main process
+[30mUncaught Exception:
+TypeError: Store is not a constructor
+    at Object.<anonymous> (/app/electron/main.js:26:15)
+    at Module._compile (node:internal/modules/cjs/loader:1738:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1904:10)
+    at Module.load (node:internal/modules/cjs/loader:1472:32)
+    at Module._load (node:internal/modules/cjs/loader:1289:12)
+    at c._load (node:electron/js2c/node_init:2:17950)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:242:24)
+    at cjsLoader (node:internal/modules/esm/translators:270:5)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:200:7)[0m
+[345:0529/100337.203111:ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:250] Missing X server or $DISPLAY
+[345:0529/100337.203156:ERROR:ui/aura/env.cc:257] The platform failed to initialize.  Exiting.
+/app/node_modules/electron/dist/electron exited with signal SIGSEGV

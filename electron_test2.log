@@ -1,0 +1,13 @@
+
+> nextn@0.1.0 start:electron
+> electron . --no-sandbox
+
+[658:0529/100604.158481:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+10:06:04.679 › Electron main process started.
+10:06:04.867 › Using default/environment variable for Spotify Client ID.
+10:06:04.868 › Using default/environment variable for Spotify Client Secret.
+10:06:04.868 › SPOTIFY_CLIENT_ID is not set or loaded from store, using placeholder. Spotify authentication will likely fail.
+10:06:04.868 › SPOTIFY_CLIENT_SECRET is not set or loaded from store, using placeholder. Spotify authentication will likely fail.
+[658:0529/100604.873947:ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:250] Missing X server or $DISPLAY
+[658:0529/100604.873989:ERROR:ui/aura/env.cc:257] The platform failed to initialize.  Exiting.
+/app/node_modules/electron/dist/electron exited with signal SIGSEGV

@@ -1,0 +1,46 @@
+
+> nextn@0.1.0 dist:win
+> npm run electron:dist
+
+
+> nextn@0.1.0 electron:dist
+> npm run build && electron-builder --win
+
+
+> nextn@0.1.0 build
+> next build
+
+   ▲ Next.js 15.3.1
+   - Environments: .env.local, .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 11.0s
+   Skipping validation of types
+   Skipping linting
+   Collecting page data ...
+   Generating static pages (0/6) ...
+   Generating static pages (1/6) 
+   Generating static pages (2/6) 
+   Generating static pages (4/6) 
+ ✓ Generating static pages (6/6)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    32.1 kB         170 kB
+├ ○ /_not-found                            977 B         102 kB
+└ ○ /admin                               7.44 kB         145 kB
++ First Load JS shared by all             101 kB
+  ├ chunks/4bd1b696-8a3c458bdab8bf04.js  53.2 kB
+  ├ chunks/684-0fcfcfe319c5c504.js       45.9 kB
+  └ other shared chunks (total)          1.92 kB
+
+
+○  (Static)  prerendered as static content
+
+  • electron-builder  version=26.0.12 os=6.6.72+
+  • loaded configuration  file=package.json ("build" field)
+  • description is missed in the package.json  appPackageFile=/app/package.json
+  • author is missed in the package.json  appPackageFile=/app/package.json
+  • executing @electron/rebuild  electronVersion=36.3.1 arch=x64 buildFromSource=false appDir=./
+  • installing native dependencies  arch=x64
